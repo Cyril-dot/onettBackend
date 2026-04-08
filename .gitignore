@@ -22,3 +22,6 @@
 # Ignore OS files
 .DS_Store
 Thumbs.db
+
+# Ignore Firebase credentials
+src/main/resources/firebase/serviceAccountKey.json
