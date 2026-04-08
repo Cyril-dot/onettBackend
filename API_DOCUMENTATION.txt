@@ -1,0 +1,958 @@
+MARKETPLACE API DOCUMENTATION
+================================================================================
+This document provides a detailed overview of all API endpoints, including
+request parameters, request bodies (DTOs), and response structures.
+
+--------------------------------------------------------------------------------
+1. AUTHENTICATION & USER MANAGEMENT (UserController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/users
+
+1.1 Register User
+    Authentication: Public
+    POST /register
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (UserRegistrationRequest): JSON string
+        - fullName (String): User's full name.
+        - email (String): User's email address.
+        - password (String): User's password (min 8 characters).
+        - phoneNumber (String): User's phone number.
+        - bio (String, optional): A short biography.
+        - location (String, optional): User's location.
+      - profilePic (MultipartFile): Image file for the profile picture.
+    Response: UserRegistrationResponse
+      - id (UUID): The unique identifier for the user.
+      - fullName (String): The user's full name.
+      - email (String): The user's email address.
+      - phoneNumber (String): The user's phone number.
+      - location (String): The user's location.
+      - role (Role): The role assigned to the user (e.g., USER).
+      - createdAt (LocalDateTime): The timestamp when the user was created.
+
+1.2 Login User
+    Authentication: Public
+    POST /login
+    Consumes: application/json
+    Request Body: UserLoginRequest
+      - email (String): User's email address.
+      - password (String): User's password.
+    Response: UserLoginResponse
+      - id (UUID): The unique identifier for the user.
+      - email (String): The user's email address.
+      - role (Role): The role of the user.
+      - accessToken (String): JWT token for authenticating subsequent requests.
+      - refreshToken (String): Token to refresh the access token.
+
+1.3 Get My Profile
+    Authentication: Authenticated (User)
+    GET /me
+    Headers: Authorization: Bearer <token>
+    Response: UserDetailsResponse
+      - id (UUID): The user's unique identifier.
+      - fullName (String): The user's full name.
+      - email (String): The user's email address.
+      - phoneNumber (String): The user's phone number.
+      - location (String): The user's location.
+      - bio (String): The user's biography.
+      - role (String): The user's role.
+      - profilePic (ProfilePicResponse): The user's profile picture details.
+        - id (Long): The ID of the profile picture.
+        - imageUrl (String): The URL of the profile picture.
+        - imagePublicId (String): The public ID for the image in the cloud storage.
+      - createdAt (LocalDateTime): The timestamp when the user was created.
+      - updatedAt (LocalDateTime): The timestamp when the user was last updated.
+
+1.4 Get Profile Picture
+    Authentication: Authenticated (User)
+    GET /me/profile-pic
+    Headers: Authorization: Bearer <token>
+    Response: ProfilePicResponse
+      - id (Long): The ID of the profile picture.
+      - imageUrl (String): The URL of the profile picture.
+      - imagePublicId (String): The public ID for the image in the cloud storage.
+
+1.5 Update Profile
+    Authentication: Authenticated (User)
+    PUT /me
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (UserUpdateRequest): JSON string
+        - fullName (String): User's full name.
+        - phoneNumber (String): User's phone number.
+        - location (String): User's location.
+        - bio (String): User's biography.
+      - profilePic (MultipartFile): Image file for the profile picture.
+    Response: UserUpdateResponse
+      - id (UUID): The user's unique identifier.
+      - fullName (String): The user's full name.
+      - email (String): The user's email address.
+      - phoneNumber (String): The user's phone number.
+      - location (String): The user's location.
+      - bio (String): The user's biography.
+      - updatedAt (LocalDateTime): The timestamp when the user was last updated.
+
+--------------------------------------------------------------------------------
+2. SELLER MANAGEMENT (SellerController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/sellers
+
+2.1 Register Seller
+    Authentication: Public
+    POST /register
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (SellerRegistrationRequest): JSON string
+        - fullName (String): Seller's full name.
+        - email (String): Seller's email address.
+        - password (String): Seller's password (min 8 characters).
+        - phoneNumber (String): Seller's phone number (Ghana format).
+        - storeName (String): The name of the seller's store.
+        - businessAddress (String): The business address of the seller.
+        - taxId (String): The seller's tax identification number.
+        - location (String, optional): The seller's location.
+        - sellerBio (String, optional): A short biography for the seller.
+        - storeDescription (String, optional): A description of the store.
+      - profilePic (MultipartFile): Image file for the seller's profile picture.
+    Response: SellerRegistrationResponse
+      - id (UUID): The unique identifier for the seller.
+      - fullName (String): The seller's full name.
+      - email (String): The seller's email address.
+      - phoneNumber (String): The seller's phone number.
+      - storeName (String): The name of the seller's store.
+      - businessAddress (String): The business address of the seller.
+      - role (String): The role assigned to the seller (e.g., SELLER).
+      - createdAt (LocalDateTime): The timestamp when the seller was created.
+
+2.2 Login Seller
+    Authentication: Public
+    POST /login
+    Consumes: application/json
+    Request Body: SellerLoginRequest
+      - email (String): Seller's email address.
+      - password (String): Seller's password.
+    Response: SellerLoginResponse
+      - id (UUID): The unique identifier for the seller.
+      - fullName (String): The seller's full name.
+      - email (String): The seller's email address.
+      - storeName (String): The name of the seller's store.
+      - role (Role): The role of the seller.
+      - accessToken (String): JWT token for authenticating subsequent requests.
+      - refreshToken (String): Token to refresh the access token.
+
+2.3 Get My Profile (Seller)
+    Authentication: Authenticated (Seller)
+    GET /me
+    Headers: Authorization: Bearer <token>
+    Response: SellerDetailsResponse
+      - id (UUID): The seller's unique identifier.
+      - fullName (String): The seller's full name.
+      - email (String): The seller's email address.
+      - phoneNumber (String): The seller's phone number.
+      - location (String): The seller's location.
+      - sellerBio (String): The seller's biography.
+      - storeName (String): The name of the seller's store.
+      - storeDescription (String): The description of the store.
+      - businessAddress (String): The business address of the seller.
+      - taxId (String): The seller's tax identification number.
+      - isVerified (boolean): Whether the seller is verified.
+      - role (String): The seller's role.
+      - profilePic (ProfilePicResponse): The seller's profile picture details.
+        - id (Long): The ID of the profile picture.
+        - imageUrl (String): The URL of the profile picture.
+        - imagePublicId (String): The public ID for the image in the cloud storage.
+      - createdAt (LocalDateTime): The timestamp when the seller was created.
+      - updatedAt (LocalDateTime): The timestamp when the seller was last updated.
+
+2.4 Get Seller by ID (Public)
+    Authentication: Public
+    GET /{sellerId}
+    Response: SellerDetailsResponse
+      - (Same as 2.3 Get My Profile (Seller))
+
+2.5 Update Profile (Seller)
+    Authentication: Authenticated (Seller)
+    PUT /me
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (SellerUpdateRequest): JSON string
+      - profilePic (MultipartFile): Image file
+    Response: SellerUpdateResponse
+      - id (UUID): The seller's unique identifier.
+      - fullName (String): The seller's full name.
+      - email (String): The seller's email address.
+      - phoneNumber (String): The seller's phone number.
+      - location (String): The seller's location.
+      - sellerBio (String): The seller's biography.
+      - storeName (String): The name of the seller's store.
+      - storeDescription (String): The description of the store.
+      - businessAddress (String): The business address of the seller.
+      - updatedAt (LocalDateTime): The timestamp when the seller was last updated.
+
+--------------------------------------------------------------------------------
+3. PRODUCT MANAGEMENT - SELLER (SellerProductController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/seller
+
+3.1 Create Category
+    Authentication: Authenticated (Seller)
+    POST /categories
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (CreateCategoryRequest): JSON string
+        - name (String): The name of the category.
+      - icon (MultipartFile): Image file for the category icon (optional).
+    Response: CategoryResponse
+      - id (UUID): The unique identifier for the category.
+      - name (String): The name of the category.
+      - slug (String): The slug for the category URL.
+      - icon (CategoryIconResponse): The category icon details.
+        - id (Long): The ID of the icon.
+        - imageUrl (String): The URL of the icon.
+        - publicId (String): The public ID for the icon in the cloud storage.
+
+3.2 Update Category
+    Authentication: Authenticated (Seller)
+    PUT /categories/{categoryId}
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (CreateCategoryRequest): JSON string
+        - name (String): The new name of the category.
+      - icon (MultipartFile): New image file for the category icon (optional).
+    Response: CategoryResponse
+      - (Same as 3.1 Create Category)
+
+3.3 Delete Category
+    Authentication: Authenticated (Seller)
+    DELETE /categories/{categoryId}
+    Headers: Authorization: Bearer <token>
+    Response: String (message)
+
+3.4 Get Seller Categories
+    Authentication: Authenticated (Seller)
+    GET /categories
+    Headers: Authorization: Bearer <token>
+    Response: List<CategoryResponse>
+      - (A list of CategoryResponse objects as defined in 3.1)
+
+3.5 Add Product
+    Authentication: Authenticated (Seller)
+    POST /products
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (CreateProductRequest): JSON string
+        - name (String): The name of the product.
+        - description (String): The description of the product.
+        - price (BigDecimal): The price of the product.
+        - categoryId (UUID): The ID of the category this product belongs to.
+        - stock (int): The available stock for the product.
+        - brand (String, optional): The brand of the product.
+        - discount (BigDecimal, optional): The discount percentage for the product.
+      - images (List<MultipartFile>): Image files for the product (optional).
+    Response: CreateProductResponse
+      - id (UUID): The unique identifier for the product.
+      - name (String): The name of the product.
+      - description (String): The description of the product.
+      - price (BigDecimal): The price of the product.
+      - categoryName (String): The name of the product's category.
+      - stock (int): The available stock for the product.
+      - brand (String): The brand of the product.
+      - discount (BigDecimal): The discount percentage for the product.
+      - status (ProductStatus): The status of the product (e.g., ACTIVE).
+      - images (List<ProductImageResponse>): A list of product images.
+        - id (Long): The ID of the image.
+        - imageUrl (String): The URL of the image.
+        - publicId (String): The public ID for the image in the cloud storage.
+
+3.6 Update Product
+    Authentication: Authenticated (Seller)
+    PUT /products/{productId}
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - data (UpdateProductRequest): JSON string
+        - name (String): The new name of the product.
+        - description (String): The new description of the product.
+        - price (BigDecimal): The new price of the product.
+        - categoryId (UUID): The new category ID for the product.
+        - brand (String): The new brand of the product.
+        - discount (BigDecimal): The new discount percentage for the product.
+      - images (List<MultipartFile>): New image files for the product (optional).
+    Response: CreateProductResponse
+      - (Same as 3.5 Add Product)
+
+3.7 Replace All Product Images
+    Authentication: Authenticated (Seller)
+    PUT /products/{productId}/images/replace
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - images (List<MultipartFile>): New image files for the product.
+    Response: CreateProductResponse
+      - (Same as 3.5 Add Product)
+
+3.8 Update Stock
+    Authentication: Authenticated (Seller)
+    PATCH /products/{productId}/stock?stock={quantity}
+    Headers: Authorization: Bearer <token>
+    Response: CreateProductResponse
+      - (Same as 3.5 Add Product)
+
+3.9 Update Product Status
+    Authentication: Authenticated (Seller)
+    PATCH /products/{productId}/status?status={ProductStatus}
+    Headers: Authorization: Bearer <token>
+    Response: CreateProductResponse
+      - (Same as 3.5 Add Product)
+
+3.10 Delete Product
+    Authentication: Authenticated (Seller)
+    DELETE /products/{productId}
+    Headers: Authorization: Bearer <token>
+    Response: String (message)
+
+3.11 Get My Products
+    Authentication: Authenticated (Seller)
+    GET /products
+    Headers: Authorization: Bearer <token>
+    Response: List<ProductSummaryResponse>
+      - id (UUID): The product's unique identifier.
+      - name (String): The product's name.
+      - price (BigDecimal): The product's price.
+      - imageUrl (String): The URL of the product's main image.
+      - stock (int): The available stock.
+      - status (ProductStatus): The product's status.
+
+3.12 Get My Products by Status
+    Authentication: Authenticated (Seller)
+    GET /products/status?status={ProductStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+3.13 Get Low Stock Products
+    Authentication: Authenticated (Seller)
+    GET /products/low-stock?threshold={number}
+    Headers: Authorization: Bearer <token>
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+3.14 Get Product Details (Public)
+    Authentication: Public
+    GET /products/{productId}
+    Response: ProductDetailsResponse
+      - id (UUID): The product's unique identifier.
+      - name (String): The product's name.
+      - description (String): The product's description.
+      - price (BigDecimal): The product's price.
+      - stock (int): The available stock.
+      - brand (String): The product's brand.
+      - discount (BigDecimal): The product's discount.
+      - status (ProductStatus): The product's status.
+      - category (CategoryResponse): The product's category details.
+      - seller (SellerSummaryResponse): The product's seller details.
+        - id (UUID): The seller's ID.
+        - storeName (String): The seller's store name.
+      - images (List<ProductImageResponse>): A list of product images.
+
+3.15 Get Products by Category (Public)
+    Authentication: Public
+    GET /products/category/{slug}
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+3.16 Search Products (Public)
+    Authentication: Public
+    GET /products/search?keyword={kw}&brand={br}&minPrice={min}&maxPrice={max}
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+3.17 Global Search (Public)
+    Authentication: Public
+    GET /products/search/global?keyword={kw}
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+3.18 Get Trending Products (Public)
+    Authentication: Public
+    GET /products/trending
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+3.19 Get Discounted Products (Public)
+    Authentication: Public
+    GET /products/discounted
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+--------------------------------------------------------------------------------
+4. PRODUCT BROWSING - USER (UserProductController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/products
+
+4.1 Home Page Feed
+    Authentication: Public
+    GET /home
+    Response: HomePageResponse
+      - trending (List<ProductSummaryResponse>): List of trending products.
+      - newArrivals (List<ProductSummaryResponse>): List of new arrival products.
+      - discounted (List<ProductSummaryResponse>): List of discounted products.
+      - categories (List<CategoryResponse>): List of all categories.
+
+4.2 Featured Products
+    Authentication: Public
+    GET /featured
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+4.3 New Arrivals
+    Authentication: Public
+    GET /new-arrivals
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+4.4 Trending Products
+    Authentication: Public
+    GET /trending
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+4.5 Discounted Products
+    Authentication: Public
+    GET /discounted
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+4.6 All Categories
+    Authentication: Public
+    GET /categories
+    Response: List<CategoryResponse>
+      - (Same as 3.1 Create Category)
+
+4.7 Products by Category
+    Authentication: Public
+    GET /categories/{slug}
+    Response: CategoryProductsResponse
+      - category (CategoryResponse): The category details.
+      - products (List<ProductSummaryResponse>): List of products in the category.
+
+4.8 Product Details
+    Authentication: Public
+    GET /{productId}
+    Response: ProductDetailsResponse
+      - (Same as 3.14 Get Product Details (Public))
+
+4.9 Products by Brand
+    Authentication: Public
+    GET /brand/{brand}
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+4.10 Products by Price Range
+    Authentication: Public
+    GET /price-range?min={min}&max={max}
+    Response: List<ProductSummaryResponse>
+      - (Same as 3.11 Get My Products)
+
+4.11 Seller Store
+    Authentication: Public
+    GET /store/{sellerId}
+    Response: SellerStoreResponse
+      - seller (SellerDetailsResponse): The seller's store details.
+      - products (List<ProductSummaryResponse>): List of products in the store.
+
+4.12 Global Search
+    Authentication: Public
+    GET /search?keyword={kw}
+    Response: SearchResultResponse
+      - products (List<ProductSummaryResponse>): List of products matching the search.
+      - categories (List<CategoryResponse>): List of related categories.
+      - sellers (List<SellerSummaryResponse>): List of related sellers.
+
+4.13 Search with Filters
+    Authentication: Public
+    GET /search/filter?keyword={kw}&brand={br}&minPrice={min}&maxPrice={max}&categorySlug={slug}
+    Response: SearchResultResponse
+      - (Same as 4.12 Global Search)
+
+4.14 Search by Location
+    Authentication: Public
+    GET /search/location?location={loc}&keyword={kw}
+    Response: SearchResultResponse
+      - (Same as 4.12 Global Search)
+
+--------------------------------------------------------------------------------
+5. CART MANAGEMENT (CartController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/cart
+
+5.1 Add to Cart
+    Authentication: Authenticated (User)
+    POST /
+    Headers: Authorization: Bearer <token>
+    Request Body: AddToCartRequest
+      - productId (UUID): The ID of the product to add.
+      - quantity (int): The quantity to add.
+    Response: CartResponse
+      - id (UUID): The cart's unique identifier.
+      - userId (UUID): The user's ID.
+      - items (List<CartItemResponse>): List of items in the cart.
+        - id (UUID): The cart item's ID.
+        - product (ProductSummaryResponse): The product details.
+        - quantity (int): The quantity of the product in the cart.
+        - subtotal (BigDecimal): The subtotal for this cart item.
+      - total (BigDecimal): The total price of the cart.
+
+5.2 View Cart
+    Authentication: Authenticated (User)
+    GET /
+    Headers: Authorization: Bearer <token>
+    Response: CartResponse
+      - (Same as 5.1 Add to Cart)
+
+5.3 Update Quantity
+    Authentication: Authenticated (User)
+    PATCH /{cartItemId}?quantity={qty}
+    Headers: Authorization: Bearer <token>
+    Response: CartResponse
+      - (Same as 5.1 Add to Cart)
+
+5.4 Remove Item
+    Authentication: Authenticated (User)
+    DELETE /{cartItemId}
+    Headers: Authorization: Bearer <token>
+    Response: CartResponse
+      - (Same as 5.1 Add to Cart)
+
+5.5 Clear Cart
+    Authentication: Authenticated (User)
+    DELETE /
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, String> (message)
+
+5.6 Cart Item Count
+    Authentication: Authenticated (User)
+    GET /count
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, Long> (count)
+
+--------------------------------------------------------------------------------
+6. ORDER MANAGEMENT (OrderController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/orders
+
+6.1 Place Order
+    Authentication: Authenticated (User)
+    POST /
+    Headers: Authorization: Bearer <token>
+    Query Params: deliveryAddress, notes (optional)
+    Response: OrderResponse
+      - id (UUID): The order's unique identifier.
+      - userId (UUID): The user's ID.
+      - items (List<OrderItemResponse>): List of items in the order.
+        - id (UUID): The order item's ID.
+        - product (ProductSummaryResponse): The product details.
+        - quantity (int): The quantity of the product ordered.
+        - price (BigDecimal): The price of the product at the time of order.
+      - total (BigDecimal): The total price of the order.
+      - status (OrderStatus): The status of the order.
+      - deliveryAddress (String): The delivery address for the order.
+      - notes (String): Any notes for the order.
+      - createdAt (LocalDateTime): The timestamp when the order was created.
+
+6.2 Get My Orders (User)
+    Authentication: Authenticated (User)
+    GET /my
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.3 Get Order Details (User)
+    Authentication: Authenticated (User)
+    GET /my/{orderId}
+    Headers: Authorization: Bearer <token>
+    Response: OrderResponse
+      - (Same as 6.1 Place Order)
+
+6.4 Get My Orders by Status (User)
+    Authentication: Authenticated (User)
+    GET /my/status?status={OrderStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.5 Get Seller Orders
+    Authentication: Authenticated (Seller)
+    GET /seller
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.6 Get Seller Orders by Status
+    Authentication: Authenticated (Seller)
+    GET /seller/status?status={OrderStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.7 Get All Orders (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.8 Get Orders by Status (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/status?status={OrderStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.9 Get Orders Today (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/today
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.10 Get Orders This Week (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/this-week
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.11 Get Orders This Month (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/this-month
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.12 Get Orders by Date Range (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/range?from={isoDate}&to={isoDate}
+    Headers: Authorization: Bearer <token>
+    Response: List<OrderResponse>
+      - (A list of OrderResponse objects as defined in 6.1)
+
+6.13 Order Summary (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/summary
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, Object>
+
+6.14 Daily Order Chart (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/chart/daily
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, Long>
+
+6.15 Update Order Status (Admin)
+    Authentication: Authenticated (Admin)
+    PATCH /admin/{orderId}/status?status={OrderStatus}
+    Headers: Authorization: Bearer <token>
+    Response: OrderResponse
+      - (Same as 6.1 Place Order)
+
+6.16 Cancel Order (Admin)
+    Authentication: Authenticated (Admin)
+    PATCH /admin/{orderId}/cancel
+    Headers: Authorization: Bearer <token>
+    Response: OrderResponse
+      - (Same as 6.1 Place Order)
+
+--------------------------------------------------------------------------------
+7. DELIVERY MANAGEMENT (DeliveryController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/deliveries
+
+7.1 Request Delivery
+    Authentication: Authenticated (User)
+    POST /
+    Headers: Authorization: Bearer <token>
+    Request Body: DeliveryRequest
+      - orderId (UUID): The ID of the order to be delivered.
+      - deliveryAddress (String): The delivery address.
+    Response: DeliveryResponse
+      - id (UUID): The delivery's unique identifier.
+      - orderId (UUID): The ID of the order being delivered.
+      - trackingNumber (String): The tracking number for the delivery.
+      - status (DeliveryStatus): The status of the delivery.
+      - estimatedDelivery (LocalDateTime): The estimated delivery date and time.
+      - createdAt (LocalDateTime): The timestamp when the delivery was requested.
+
+7.2 Get My Deliveries (User)
+    Authentication: Authenticated (User)
+    GET /my
+    Headers: Authorization: Bearer <token>
+    Response: List<DeliveryResponse>
+      - (A list of DeliveryResponse objects as defined in 7.1)
+
+7.3 Get My Deliveries by Status (User)
+    Authentication: Authenticated (User)
+    GET /my/status?status={DeliveryStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<DeliveryResponse>
+      - (A list of DeliveryResponse objects as defined in 7.1)
+
+7.4 Track Delivery (Public)
+    Authentication: Public
+    GET /track/{trackingNumber}
+    Response: DeliveryResponse
+      - (Same as 7.1 Request Delivery)
+
+7.5 Cancel Delivery
+    Authentication: Authenticated (User)
+    PATCH /{deliveryId}/cancel
+    Headers: Authorization: Bearer <token>
+    Response: DeliveryResponse
+      - (Same as 7.1 Request Delivery)
+
+7.6 Get Seller Deliveries
+    Authentication: Authenticated (Seller)
+    GET /seller
+    Headers: Authorization: Bearer <token>
+    Response: List<DeliveryResponse>
+      - (A list of DeliveryResponse objects as defined in 7.1)
+
+7.7 Get Seller Deliveries by Status
+    Authentication: Authenticated (Seller)
+    GET /seller/status?status={DeliveryStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<DeliveryResponse>
+      - (A list of DeliveryResponse objects as defined in 7.1)
+
+7.8 Get All Deliveries (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin
+    Headers: Authorization: Bearer <token>
+    Response: List<DeliveryResponse>
+      - (A list of DeliveryResponse objects as defined in 7.1)
+
+7.9 Get Deliveries by Status (Admin)
+    Authentication: Authenticated (Admin)
+    GET /admin/status?status={DeliveryStatus}
+    Headers: Authorization: Bearer <token>
+    Response: List<DeliveryResponse>
+      - (A list of DeliveryResponse objects as defined in 7.1)
+
+7.10 Update Delivery Status (Admin)
+    Authentication: Authenticated (Admin)
+    PATCH /admin/{deliveryId}/status?status={DeliveryStatus}
+    Headers: Authorization: Bearer <token>
+    Response: DeliveryResponse
+      - (Same as 7.1 Request Delivery)
+
+--------------------------------------------------------------------------------
+8. CHAT & MESSAGING (ChatController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/chat
+
+8.1 Start Conversation
+    Authentication: Authenticated (User)
+    POST /conversations
+    Headers: Authorization: Bearer <token>
+    Request Body: StartConversationRequest
+      - sellerId (UUID): The ID of the seller to start a conversation with.
+      - initialMessage (String): The initial message to send.
+    Response: ConversationResponse
+      - id (UUID): The conversation's unique identifier.
+      - userId (UUID): The user's ID.
+      - sellerId (UUID): The seller's ID.
+      - lastMessage (String): The last message in the conversation.
+      - unreadCount (int): The number of unread messages.
+      - updatedAt (LocalDateTime): The timestamp of the last message.
+
+8.2 User Send Message
+    Authentication: Authenticated (User)
+    POST /conversations/{conversationId}/message
+    Headers: Authorization: Bearer <token>
+    Request Body: SendMessageRequest
+      - content (String): The content of the message.
+    Response: MessageResponse
+      - id (UUID): The message's unique identifier.
+      - conversationId (UUID): The ID of the conversation.
+      - senderId (UUID): The ID of the sender.
+      - senderType (SenderType): The type of the sender (USER or SELLER).
+      - content (String): The content of the message.
+      - timestamp (LocalDateTime): The timestamp of the message.
+
+8.3 Seller Reply
+    Authentication: Authenticated (Seller)
+    POST /seller/conversations/{conversationId}/reply
+    Headers: Authorization: Bearer <token>
+    Request Body: SendMessageRequest
+      - content (String): The content of the message.
+    Response: MessageResponse
+      - (Same as 8.2 User Send Message)
+
+8.4 Get Seller Inbox
+    Authentication: Authenticated (Seller)
+    GET /seller/inbox
+    Headers: Authorization: Bearer <token>
+    Response: List<SellerInboxResponse>
+      - conversationId (UUID): The conversation's unique identifier.
+      - userName (String): The name of the user in the conversation.
+      - lastMessage (String): The last message in the conversation.
+      - unreadCount (int): The number of unread messages from the user.
+      - lastMessageTimestamp (LocalDateTime): The timestamp of the last message.
+
+8.5 Get Chat History
+    Authentication: Authenticated (User/Seller)
+    GET /conversations/{conversationId}/history
+    Headers: Authorization: Bearer <token>
+    Response: ChatHistoryResponse
+      - conversationId (UUID): The conversation's unique identifier.
+      - messages (List<MessageResponse>): A list of all messages in the conversation.
+
+8.6 Get User Conversations
+    Authentication: Authenticated (User)
+    GET /conversations
+    Headers: Authorization: Bearer <token>
+    Response: List<ConversationResponse>
+      - (A list of ConversationResponse objects as defined in 8.1)
+
+8.7 Get User Unread Conversations
+    Authentication: Authenticated (User)
+    GET /conversations/unread
+    Headers: Authorization: Bearer <token>
+    Response: List<ConversationResponse>
+      - (A list of ConversationResponse objects as defined in 8.1)
+
+8.8 Get Seller Conversations
+    Authentication: Authenticated (Seller)
+    GET /seller/conversations
+    Headers: Authorization: Bearer <token>
+    Response: List<ConversationResponse>
+      - (A list of ConversationResponse objects as defined in 8.1)
+
+8.9 Get Seller Unread Conversations
+    Authentication: Authenticated (Seller)
+    GET /seller/conversations/unread
+    Headers: Authorization: Bearer <token>
+    Response: List<ConversationResponse>
+      - (A list of ConversationResponse objects as defined in 8.1)
+
+8.10 Get Unread Count
+    Authentication: Authenticated (User/Seller)
+    GET /unread-count
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, Long>
+
+8.11 Mark as Read
+    Authentication: Authenticated (User/Seller)
+    PATCH /conversations/{conversationId}/read
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, String>
+
+8.12 Delete Conversation
+    Authentication: Authenticated (User)
+    DELETE /conversations/{conversationId}
+    Headers: Authorization: Bearer <token>
+    Response: Map<String, String>
+
+--------------------------------------------------------------------------------
+9. AI MARKETPLACE FEATURES (AiMarketplaceController)
+--------------------------------------------------------------------------------
+Base URL: /api/v1/ai
+
+9.1 AI Chat (Shopping Assistant)
+    Authentication: Authenticated (User)
+    POST /chat
+    Headers: Authorization: Bearer <token>
+    Query Params: message, budget (optional)
+    Response: AiChatResponse
+      - response (String): The AI's response message.
+      - products (List<ProductCardPayload>): A list of recommended products.
+        - productId (UUID): The product's ID.
+        - productName (String): The product's name.
+        - price (BigDecimal): The product's price.
+        - imageUrl (String): The URL of the product's image.
+
+9.2 Location-Based Search
+    Authentication: Authenticated (User)
+    GET /search/location
+    Headers: Authorization: Bearer <token>
+    Query Params: location, query
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.3 Image-Based Search
+    Authentication: Authenticated (User)
+    POST /search/image
+    Headers: Authorization: Bearer <token>
+    Consumes: multipart/form-data
+    Request Parts:
+      - image (MultipartFile): Image file
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.4 Fashion & Budget Advisor
+    Authentication: Authenticated (User)
+    POST /fashion-advice
+    Headers: Authorization: Bearer <token>
+    Query Params: query, budget (optional), occasion (optional)
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.5 Generate Listing (Seller)
+    Authentication: Authenticated (Seller)
+    POST /seller/generate-listing
+    Headers: Authorization: Bearer <token>
+    Query Params: productName, basicDetails
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.6 Suggest Price (Seller)
+    Authentication: Authenticated (Seller)
+    GET /seller/suggest-price
+    Headers: Authorization: Bearer <token>
+    Query Params: productName, productDetails, condition (optional)
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.7 Inventory Analysis (Seller)
+    Authentication: Authenticated (Seller)
+    GET /seller/inventory-analysis
+    Headers: Authorization: Bearer <token>
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.8 Improve Visibility (Seller)
+    Authentication: Authenticated (Seller)
+    GET /seller/improve-visibility/{productId}
+    Headers: Authorization: Bearer <token>
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.9 Trend Analysis
+    Authentication: Authenticated (User/Seller)
+    GET /trends
+    Headers: Authorization: Bearer <token>
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+9.10 Product Comparison
+    Authentication: Authenticated (User)
+    POST /compare
+    Headers: Authorization: Bearer <token>
+    Query Params: productIds (List<UUID>), query
+    Response: AiChatResponse
+      - (Same as 9.1 AI Chat)
+
+--------------------------------------------------------------------------------
+10. UTILITY (PingController)
+--------------------------------------------------------------------------------
+Base URL: /
+
+10.1 Ping
+    Authentication: Public
+    GET /ping
+    Response: String ("pong")

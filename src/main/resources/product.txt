@@ -1,0 +1,14 @@
+1. User clicks "List a Product"
+      → ProductRequest created (paid = false, paystackReference = null)
+      → Return Paystack payment link to frontend
+
+2. User pays → Paystack webhook hits your backend
+      → Find ProductRequest by paystackReference
+      → Set paid = true, approvalStatus = APPROVED
+
+3. User now fills in product details & uploads images
+      → Check: productRequest.paid == true && productRequest.userProduct == null
+      → Create UserProduct linked to that ProductRequest
+
+4. Admin reviews
+      → Sets UserProduct.approvalStatus = APPROVED / REJECTED
