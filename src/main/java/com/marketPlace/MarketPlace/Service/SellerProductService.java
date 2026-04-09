@@ -215,7 +215,7 @@ public class SellerProductService {
         // ── Discount recalculation ────────────────────────────
         BigDecimal effectivePrice      = request.getPrice()              != null ? request.getPrice()              : product.getPrice();
         BigDecimal effectivePercentage = request.getDiscountPercentage() != null ? request.getDiscountPercentage() : product.getDiscountPercentage();
-        boolean    effectiveDiscounted = request.getIsDiscounted()       != null ? request.getIsDiscounted()       : product.getDiscounted();
+        boolean    effectiveDiscounted = request.getIsDiscounted()       != null ? request.getIsDiscounted()       : Boolean.TRUE.equals(product.getDiscounted());
 
         if (request.getPrice() != null) product.setPrice(effectivePrice);
 
@@ -673,9 +673,9 @@ public class SellerProductService {
                 .price(p.getPrice())
                 .brand(p.getBrand())
                 .stock(p.getStock())
-                .discounted(p.getDiscounted())
-                .discountPercentage(p.getDiscountPercentage())
-                .discountPrice(p.getDiscountPrice())
+                .discounted(Boolean.TRUE.equals(p.getDiscounted()))
+                .discountPercentage(Boolean.TRUE.equals(p.getDiscounted()) ? p.getDiscountPercentage() : null)
+                .discountPrice(Boolean.TRUE.equals(p.getDiscounted()) ? p.getDiscountPrice() : null)
                 .productStatus(p.getProductStatus().name())
                 .stockStatus(p.getStockStatus())
                 .availableInDays(p.getAvailableInDays())
@@ -693,13 +693,15 @@ public class SellerProductService {
                 .map(ProductImage::getImageUrl)
                 .orElse(null);
 
+        boolean isDiscounted = Boolean.TRUE.equals(p.getDiscounted());
+
         return ProductSummaryResponse.builder()
                 .id(p.getId())
                 .name(p.getName())
                 .price(p.getPrice())
-                .isDiscounted(p.getDiscounted())
-                .discountPercentage(p.getDiscountPercentage())
-                .discountPrice(p.getDiscountPrice())
+                .isDiscounted(isDiscounted)
+                .discountPercentage(isDiscounted ? p.getDiscountPercentage() : null)
+                .discountPrice(isDiscounted ? p.getDiscountPrice() : null)
                 .brand(p.getBrand())
                 .productStatus(p.getProductStatus().name())
                 .stockStatus(p.getStockStatus())
@@ -714,14 +716,16 @@ public class SellerProductService {
     }
 
     private ProductDetailsResponse mapToDetailsResponse(Product p, ProductCategory category) {
+        boolean isDiscounted = Boolean.TRUE.equals(p.getDiscounted());
+
         return ProductDetailsResponse.builder()
                 .id(p.getId())
                 .name(p.getName())
                 .price(p.getPrice())
                 .productDescription(p.getProductDescription())
-                .isDiscounted(p.getDiscounted())
-                .discountPercentage(p.getDiscountPercentage())
-                .discountPrice(p.getDiscountPrice())
+                .isDiscounted(isDiscounted)
+                .discountPercentage(isDiscounted ? p.getDiscountPercentage() : null)
+                .discountPrice(isDiscounted ? p.getDiscountPrice() : null)
                 .stock(p.getStock())
                 .brand(p.getBrand())
                 .productStatus(p.getProductStatus().name())

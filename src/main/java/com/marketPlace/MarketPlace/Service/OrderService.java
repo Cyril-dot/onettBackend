@@ -91,8 +91,14 @@ public class OrderService {
 
         for (Cart cart : cartItems) {
             Product product = cart.getProduct();
-            BigDecimal unitPrice = product.getDiscounted()
-                    ? product.getDiscountPrice() : product.getPrice();
+
+            // FIX: null-safe Boolean check — prevents NPE and ensures discount is always applied correctly
+            boolean isDiscounted = Boolean.TRUE.equals(product.getDiscounted());
+            BigDecimal discountPrice = product.getDiscountPrice();
+            BigDecimal unitPrice = (isDiscounted && discountPrice != null)
+                    ? discountPrice
+                    : product.getPrice();
+
             BigDecimal subTotal = unitPrice.multiply(BigDecimal.valueOf(cart.getQuantity()));
 
             items.add(OrderItem.builder()
