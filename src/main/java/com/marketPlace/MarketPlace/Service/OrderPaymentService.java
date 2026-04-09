@@ -21,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -60,35 +61,46 @@ public class OrderPaymentService {
             throw new ApiException("Order is not in a payable state: " + order.getOrderStatus());
         }
 
-        // Idempotency check
+        // ── Detect pre-order upfront (needed for both idempotency and new payment) ──
+        boolean isPreOrder = isPreOrderOrder(order);
+
+        BigDecimal chargeAmount = isPreOrder
+                ? order.getTotal().divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP)
+                : order.getTotal();
+
+        BigDecimal remainingAmount = isPreOrder
+                ? order.getTotal().subtract(chargeAmount)
+                : null;
+
+        // ── Idempotency check — return existing PENDING payment if available ────────
+        // FIX: now includes isPreOrder / depositAmount / remainingAmount so the
+        //      frontend always gets complete data even on retry.
         Optional<Payment> existing = paymentRepo.findByOrderId(orderId);
         if (existing.isPresent()
                 && existing.get().getAuthorizationUrl() != null
                 && existing.get().getPaymentStatus() == PaymentStatus.PENDING) {
+
             log.info("Returning existing payment URL for order [{}]", orderId);
+
             return PaymentInitResponse.builder()
                     .authorizationUrl(existing.get().getAuthorizationUrl())
                     .accessCode(existing.get().getAccessCode())
                     .reference(existing.get().getPaystackReference())
                     .orderId(orderId)
+                    .isPreOrder(isPreOrder)
+                    .depositAmount(isPreOrder ? chargeAmount : null)
+                    .remainingAmount(remainingAmount)
                     .build();
         }
 
-        // Detect pre-order (COMING_SOON or PRE_ORDER stock status)
-        boolean isPreOrder = order.getOrderItems().stream()
-                .anyMatch(item ->
-                        item.getProduct().getStockStatus() == StockStatus.COMING_SOON
-                                || item.getProduct().getStockStatus() == StockStatus.PRE_ORDER);
-
-        // Charge 50% for pre-orders, full amount for normal orders
-        BigDecimal chargeAmount = isPreOrder
-                ? order.getTotal().divide(BigDecimal.valueOf(2), 2, java.math.RoundingMode.HALF_UP)
-                : order.getTotal();
-
+        // ── Build Paystack payload ─────────────────────────────────────────────────
         String reference = generateReference(orderId);
 
+        // FIX: use setScale + HALF_UP before longValue() to avoid silent truncation
+        //      e.g. 149.999 pesewas → was 149, now correctly 150
         long amountInPesewas = chargeAmount
                 .multiply(BigDecimal.valueOf(100))
+                .setScale(0, RoundingMode.HALF_UP)
                 .longValue();
 
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -110,6 +122,7 @@ public class OrderPaymentService {
         log.info("Initializing Paystack payment for order [{}] — ref: [{}] — amount: {} pesewas — preOrder: {}",
                 orderId, reference, amountInPesewas, isPreOrder);
 
+        // ── Call Paystack ──────────────────────────────────────────────────────────
         ResponseEntity<String> response;
         try {
             response = restTemplate.postForEntity(
@@ -129,22 +142,23 @@ public class OrderPaymentService {
             throw new ApiException("Payment initialization failed: " + msg);
         }
 
-        JsonNode data = json.path("data");
+        JsonNode data         = json.path("data");
         String authorizationUrl = data.path("authorization_url").asText();
         String accessCode       = data.path("access_code").asText();
 
+        // ── Persist payment record ─────────────────────────────────────────────────
         Payment payment = Payment.builder()
                 .order(order)
                 .paystackReference(reference)
                 .authorizationUrl(authorizationUrl)
                 .accessCode(accessCode)
-                .amount(chargeAmount)
+                .amount(chargeAmount)               // actual charge (50% for pre-orders)
                 .paymentStatus(PaymentStatus.PENDING)
                 .build();
 
         paymentRepo.save(payment);
 
-        log.info("Payment initialized for order [{}] — charged: {} — preOrder: {} — status: PENDING",
+        log.info("Payment initialized for order [{}] — charged: {} GHS — preOrder: {} — status: PENDING",
                 orderId, chargeAmount, isPreOrder);
 
         return PaymentInitResponse.builder()
@@ -154,7 +168,7 @@ public class OrderPaymentService {
                 .orderId(orderId)
                 .isPreOrder(isPreOrder)
                 .depositAmount(isPreOrder ? chargeAmount : null)
-                .remainingAmount(isPreOrder ? order.getTotal().subtract(chargeAmount) : null)
+                .remainingAmount(remainingAmount)
                 .build();
     }
 
@@ -190,14 +204,16 @@ public class OrderPaymentService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // VERIFY PAYMENT (polling fallback)
+    // VERIFY PAYMENT  (polling fallback for callback page)
     // ═══════════════════════════════════════════════════════════
 
     @Transactional
     public PaymentVerifyResponse verifyPayment(String reference) {
         Payment payment = paymentRepo.findByPaystackReference(reference)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for reference: " + reference));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Payment not found for reference: " + reference));
 
+        // Already settled — return cached result without hitting Paystack again
         if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
             log.info("Payment [{}] already verified as SUCCESS", reference);
             return buildVerifyResponse(payment, true);
@@ -207,6 +223,7 @@ public class OrderPaymentService {
             return buildVerifyResponse(payment, false);
         }
 
+        // ── Ask Paystack ───────────────────────────────────────────────────────────
         HttpHeaders headers = buildHeaders();
         HttpEntity<Void> requestEntity = new HttpEntity<>(headers);
 
@@ -225,8 +242,8 @@ public class OrderPaymentService {
             throw new ApiException("Payment verification failed — please try again");
         }
 
-        JsonNode json = parseResponse(response.getBody());
-        String status = json.path("data").path("status").asText();
+        JsonNode json   = parseResponse(response.getBody());
+        String   status = json.path("data").path("status").asText();
 
         log.info("Paystack verification result for [{}]: status = [{}]", reference, status);
 
@@ -278,17 +295,17 @@ public class OrderPaymentService {
         payment.setPaidAt(LocalDateTime.now());
         paymentRepo.save(payment);
 
-        UUID orderId = payment.getOrder().getId();
-
-        boolean isPreOrder = payment.getOrder().getOrderItems().stream()
-                .anyMatch(item ->
-                        item.getProduct().getStockStatus() == StockStatus.COMING_SOON
-                                || item.getProduct().getStockStatus() == StockStatus.PRE_ORDER);
+        UUID    orderId    = payment.getOrder().getId();
+        boolean isPreOrder = isPreOrderOrder(payment.getOrder());
 
         if (isPreOrder) {
+            // Deposit confirmed — PreOrderService takes over from here:
+            //   creates PreOrderRecord, updates order to DEPOSIT_PAID,
+            //   clears cart, opens order chat, notifies customer.
             log.info("Payment SUCCESS (deposit) for pre-order [{}] — routing to PreOrderService", orderId);
             preOrderService.handleDepositPaid(orderId);
         } else {
+            // Full payment confirmed — confirm order and open chat normally.
             log.info("Payment SUCCESS for order [{}] — confirming normally", orderId);
             orderService.confirmOrderAfterPayment(orderId);
             chatService.createOrderChat(orderId);
@@ -302,9 +319,26 @@ public class OrderPaymentService {
         paymentRepo.save(payment);
 
         UUID orderId = payment.getOrder().getId();
-        log.warn("Payment FAILED — updating order [{}]", orderId);
-
+        log.warn("Payment FAILED — updating order [{}] to PAYMENT_FAILED", orderId);
         orderService.markOrderPaymentFailed(orderId);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // PRIVATE — PRE-ORDER DETECTION HELPER
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Returns true if ANY item in the order is a product with
+     * StockStatus.PRE_ORDER or StockStatus.COMING_SOON.
+     *
+     * Extracted as a helper so the same logic isn't duplicated across
+     * initializePayment(), processSuccessfulPayment(), and verifyPayment().
+     */
+    private boolean isPreOrderOrder(Order order) {
+        return order.getOrderItems().stream()
+                .anyMatch(item ->
+                        item.getProduct().getStockStatus() == StockStatus.PRE_ORDER
+                                || item.getProduct().getStockStatus() == StockStatus.COMING_SOON);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -328,7 +362,9 @@ public class OrderPaymentService {
             if (!valid) {
                 log.warn("Signature mismatch — expected [{}...] got [{}...]",
                         hexHash.toString().substring(0, 16),
-                        signature != null ? signature.substring(0, Math.min(16, signature.length())) : "null");
+                        signature != null
+                                ? signature.substring(0, Math.min(16, signature.length()))
+                                : "null");
             }
             return valid;
         } catch (Exception e) {
@@ -338,7 +374,7 @@ public class OrderPaymentService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // PRIVATE — HELPERS
+    // PRIVATE — GENERAL HELPERS
     // ═══════════════════════════════════════════════════════════
 
     private HttpHeaders buildHeaders() {
@@ -358,8 +394,10 @@ public class OrderPaymentService {
     }
 
     private String generateReference(UUID orderId) {
-        return "MKT-" + orderId.toString().replace("-", "").substring(0, 12).toUpperCase()
-                + "-" + System.currentTimeMillis();
+        return "MKT-"
+                + orderId.toString().replace("-", "").substring(0, 12).toUpperCase()
+                + "-"
+                + System.currentTimeMillis();
     }
 
     private PaymentVerifyResponse buildVerifyResponse(Payment payment, boolean success) {
