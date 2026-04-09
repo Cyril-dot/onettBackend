@@ -20,7 +20,7 @@ public class CorsConfig {
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
                 "http://localhost:3000",
-                // ngrok — all subdomains, all TLDs
+                // ngrok
                 "https://*.ngrok-free.app",
                 "https://*.ngrok-free.dev",
                 "https://*.ngrok.io",
@@ -31,13 +31,20 @@ public class CorsConfig {
                 "http://localhost:5500",
                 "http://localhost:8081",
                 "http://192.168.8.127:8081",
+                // Lovable
                 "https://lovable.dev",
                 "https://*.lovable.dev",
                 "https://savvymarket.lovable.app",
                 "https://*.lovable.app",
                 "https://*.lovableproject.com",
+                // Vercel
                 "https://onett-user-frontend.vercel.app",
-                "https://onett-admin-frontend.vercel.app"
+                "https://onett-admin-frontend.vercel.app",
+                // Production
+                "https://onett.shop",
+                "https://www.onett.shop",
+                "https://onett.my",
+                "https://www.onett.my"
         ));
 
         config.setAllowedMethods(List.of(
