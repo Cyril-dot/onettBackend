@@ -35,7 +35,8 @@ public class CorsConfig {
                 "https://*.lovable.dev",
                 "https://savvymarket.lovable.app",
                 "https://*.lovable.app",
-                "https://*.lovableproject.com"
+                "https://*.lovableproject.com",
+                "https://onett-user-frontend.vercel.app"
         ));
 
         config.setAllowedMethods(List.of(
