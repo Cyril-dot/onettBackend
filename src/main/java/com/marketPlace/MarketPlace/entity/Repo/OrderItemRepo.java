@@ -2,7 +2,9 @@ package com.marketPlace.MarketPlace.entity.Repo;
 
 import com.marketPlace.MarketPlace.entity.OrderItem;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -47,6 +49,10 @@ public interface OrderItemRepo extends JpaRepository<OrderItem, UUID> {
             ORDER BY totalSold DESC
             """)
     List<Object[]> findBestSellingProducts();
+
+    @Modifying
+    @Query("UPDATE OrderItem oi SET oi.product = null WHERE oi.product.id = :productId")
+    void nullifyProductReference(@Param("productId") UUID productId);
 
     // --- Best selling products for a specific seller ---
     @Query("""

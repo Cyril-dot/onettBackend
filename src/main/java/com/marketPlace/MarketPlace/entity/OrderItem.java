@@ -29,7 +29,7 @@ public class OrderItem {
     private BigDecimal subTotal;
 
     @ManyToOne
-    @JoinColumn(name = "product_id")
+    @JoinColumn(name = "product_id", nullable = true)  // ← ensure this
     private Product product;
 
     @ManyToOne(fetch = FetchType.LAZY)

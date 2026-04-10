@@ -27,6 +27,7 @@ public class SellerProductService {
 
     private final ProductRepo           productRepo;
     private final ProductImageRepo      productImageRepo;
+    private final OrderItemRepo orderItemRepo;
     private final ProductVideoRepository      productVideoRepo;
     private final SellerRepo            sellerRepo;
     private final ProductCategoryRepo   categoryRepo;
@@ -410,6 +411,10 @@ public class SellerProductService {
         Product product = findProductById(productId);
         validateSellerOwnsProduct(product, sellerId);
 
+        // ── Nullify product reference in order_items ──────────────
+        orderItemRepo.nullifyProductReference(productId);
+
+        // ── Delete images from Cloudinary ─────────────────────────
         for (ProductImage img : product.getImages()) {
             try { cloudinaryService.deleteImage(img.getImagePublicId()); }
             catch (Exception e) { log.warn("Failed to delete image [{}]: {}", img.getImagePublicId(), e.getMessage()); }
@@ -417,11 +422,13 @@ public class SellerProductService {
         productImageRepo.deleteByProductId(productId);
         product.getImages().clear();
 
+        // ── Delete video ──────────────────────────────────────────
         if (product.getProductVideo() != null) {
             try { deleteVideoFromCloudinaryAndDb(product); }
             catch (Exception e) { log.warn("Failed to delete video for product [{}]: {}", productId, e.getMessage()); }
         }
 
+        // ── Unlink category ───────────────────────────────────────
         categoryRepo.findByProductId(productId).ifPresent(cat -> {
             cat.setProduct(null);
             categoryRepo.save(cat);
@@ -431,7 +438,6 @@ public class SellerProductService {
         log.info("Product deleted: [{}]", product.getName());
         return "Product '" + product.getName() + "' deleted successfully";
     }
-
     // ═══════════════════════════════════════════════════════════
     //  READ / VIEW OPERATIONS
     // ═══════════════════════════════════════════════════════════
