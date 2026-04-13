@@ -1,18 +1,18 @@
 package com.marketPlace.MarketPlace.Service;
 
-import com.marketPlace.MarketPlace.dtos.PaystackInitiatePayload;
-import com.marketPlace.MarketPlace.dtos.PaystackVerifyPayload;
-import com.marketPlace.MarketPlace.dtos.ProductRequestInitiatePayload;
-import com.marketPlace.MarketPlace.dtos.ProductRequestVerifyPayload;
+import com.marketPlace.MarketPlace.dtos.ProductListingPaymentResponse;
 import com.marketPlace.MarketPlace.dtos.ProductRequestPayload;
 import com.marketPlace.MarketPlace.entity.ProductRequest;
 import com.marketPlace.MarketPlace.entity.Repo.ProductRequestRepository;
 import com.marketPlace.MarketPlace.entity.Repo.UserRepo;
 import com.marketPlace.MarketPlace.entity.User;
+import com.marketPlace.MarketPlace.exception.ApiException;
+import com.marketPlace.MarketPlace.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -22,50 +22,47 @@ import java.util.UUID;
 public class ProductRequestService {
 
     private final ProductRequestRepository productRequestRepository;
-    private final UserRepo userRepository;
-    private final PaystackService paystackService;
+    private final UserRepo                 userRepository;
+    private final PaystackService          paystackService;
+    private final NotificationService      notificationService;
 
 
     // ════════════════════════════════════════════════════════════════
-    // STEP 1 — User initiates payment for a product listing
+    // STEP 1 — User submits MoMo payment proof for a product listing
     // ════════════════════════════════════════════════════════════════
 
     @Transactional
-    public ProductRequestInitiatePayload initiatePayment(UUID userId) {
-        log.info("🚀 [ProductRequestService] Initiating payment for userId: {}", userId);
+    public ProductListingPaymentResponse submitListingPayment(UUID userId,
+                                                              String senderAccountName,
+                                                              String senderPhoneNumber,
+                                                              MultipartFile screenshot) {
+        log.info("🚀 [ProductRequestService] Submitting listing payment — userId: {}", userId);
 
-        // 1. Validate user exists
+        // Validate user exists before delegating
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> {
                     log.error("❌ [ProductRequestService] User not found — userId: {}", userId);
-                    return new RuntimeException("User not found");
+                    return new ResourceNotFoundException("User not found: " + userId);
                 });
 
         log.debug("✅ [ProductRequestService] User found — email: {}", user.getEmail());
 
         try {
-            // 2. Delegate to PaystackService — handles ProductRequest creation + Paystack call
-            PaystackInitiatePayload paystackResponse = paystackService.initiatePayment(userId);
+            // Delegate to PaystackService — handles Cloudinary upload + ProductRequest creation
+            ProductListingPaymentResponse response = paystackService.submitListingPayment(
+                    userId, senderAccountName, senderPhoneNumber, screenshot);
 
-            log.info("✅ [ProductRequestService] Payment initiated successfully — " +
-                            "userId: {}, email: {}, reference: {}, amount: {} GHS",
-                    userId, user.getEmail(),
-                    paystackResponse.getReference(),
-                    paystackResponse.getAmount());
+            log.info("✅ [ProductRequestService] Listing payment submitted — " +
+                            "userId: {}, email: {}, productRequestId: {}",
+                    userId, user.getEmail(), response.getProductRequestId());
 
-            // 3. Map Paystack response to our own response DTO
-            return ProductRequestInitiatePayload.builder()
-                    .productRequestId(paystackResponse.getProductRequestId())
-                    .reference(paystackResponse.getReference())
-                    .authorizationUrl(paystackResponse.getAuthorizationUrl())
-                    .accessCode(paystackResponse.getAccessCode())
-                    .amount(paystackResponse.getAmount())
-                    .currency(paystackResponse.getCurrency())
-                    .email(paystackResponse.getEmail())
-                    .build();
+            // Notify user that their submission is under review
+            notificationService.notifyProductRequestSubmitted(user, response.getProductRequestId());
 
-        } catch (RuntimeException e) {
-            log.error("❌ [ProductRequestService] Payment initiation failed — " +
+            return response;
+
+        } catch (ApiException | ResourceNotFoundException e) {
+            log.error("❌ [ProductRequestService] Listing payment submission failed — " +
                     "userId: {}, reason: {}", userId, e.getMessage());
             throw e;
         }
@@ -73,47 +70,61 @@ public class ProductRequestService {
 
 
     // ════════════════════════════════════════════════════════════════
-    // STEP 2 — Verify payment after Paystack redirects user back
+    // STEP 2 — Admin confirms MoMo payment (marks paid = true)
     // ════════════════════════════════════════════════════════════════
 
     @Transactional
-    public ProductRequestVerifyPayload verifyPayment(String reference) {
-        log.info("🔍 [ProductRequestService] Verifying payment — reference: {}", reference);
+    public void confirmListingPayment(UUID productRequestId) {
+        log.info("✅ [ProductRequestService] Admin confirming payment — productRequestId: {}",
+                productRequestId);
 
-        if (reference == null || reference.isBlank()) {
-            log.error("❌ [ProductRequestService] Payment reference is null or blank");
-            throw new RuntimeException("Payment reference cannot be empty");
-        }
+        // Fetch before confirming so we can notify the correct user
+        ProductRequest productRequest = productRequestRepository.findById(productRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ProductRequest not found: " + productRequestId));
 
-        try {
-            // 1. Delegate to PaystackService — handles paid = true update
-            PaystackVerifyPayload paystackResponse = paystackService.verifyPayment(reference);
+        User user = productRequest.getUser();
 
-            log.info("✅ [ProductRequestService] Payment verification completed — " +
-                            "reference: {}, status: {}, paid: {}",
-                    reference,
-                    paystackResponse.getStatus(),
-                    paystackResponse.getPaid());
+        // Delegate state change to PaystackService
+        paystackService.confirmListingPayment(productRequestId);
 
-            // 2. Map to our own response DTO
-            return ProductRequestVerifyPayload.builder()
-                    .productRequestId(paystackResponse.getProductRequestId())
-                    .reference(paystackResponse.getReference())
-                    .status(paystackResponse.getStatus())
-                    .message(paystackResponse.getMessage())
-                    .paid(paystackResponse.getPaid())
-                    .build();
+        log.info("✅ [ProductRequestService] Payment confirmed — productRequestId: {}, user: {}",
+                productRequestId, user.getEmail());
 
-        } catch (RuntimeException e) {
-            log.error("❌ [ProductRequestService] Payment verification failed — " +
-                    "reference: {}, reason: {}", reference, e.getMessage());
-            throw e;
-        }
+        // Notify user their payment was confirmed and they can now upload their product
+        notificationService.notifyProductRequestApproved(user, productRequestId);
     }
 
 
     // ════════════════════════════════════════════════════════════════
-    // STEP 3 — Get a specific ProductRequest (before uploading product)
+    // STEP 3 — Admin rejects MoMo payment
+    // ════════════════════════════════════════════════════════════════
+
+    @Transactional
+    public void rejectListingPayment(UUID productRequestId, String reason) {
+        log.warn("⚠️ [ProductRequestService] Admin rejecting payment — " +
+                "productRequestId: {}, reason: {}", productRequestId, reason);
+
+        // Fetch before rejecting so we can notify the correct user
+        ProductRequest productRequest = productRequestRepository.findById(productRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ProductRequest not found: " + productRequestId));
+
+        User user = productRequest.getUser();
+
+        // Delegate state change to PaystackService
+        paystackService.rejectListingPayment(productRequestId, reason);
+
+        log.warn("❌ [ProductRequestService] Payment rejected — productRequestId: {}, user: {}",
+                productRequestId, user.getEmail());
+
+        // Notify user their payment was rejected with reason
+        notificationService.notifyProductRequestRejected(user, productRequestId, reason);
+    }
+
+
+    // ════════════════════════════════════════════════════════════════
+    // STEP 4 — Get a specific ProductRequest (before uploading product)
     // ════════════════════════════════════════════════════════════════
 
     @Transactional(readOnly = true)
@@ -126,22 +137,22 @@ public class ProductRequestService {
                 .orElseThrow(() -> {
                     log.error("❌ [ProductRequestService] ProductRequest not found — id: {}",
                             productRequestId);
-                    return new RuntimeException("Product request not found");
+                    return new ResourceNotFoundException("Product request not found: " + productRequestId);
                 });
 
         // 2. Ownership check
         if (!productRequest.getUser().getId().equals(userId)) {
-            log.warn("⚠️ [ProductRequestService] Unauthorized access attempt — " +
+            log.warn("⚠️ [ProductRequestService] Unauthorized access — " +
                             "productRequestId: {}, requestingUserId: {}, ownerUserId: {}",
                     productRequestId, userId, productRequest.getUser().getId());
-            throw new RuntimeException("Unauthorized — this product request does not belong to you");
+            throw new ApiException("Unauthorized — this product request does not belong to you");
         }
 
-        // 3. Check if payment was completed
+        // 3. Check if admin has confirmed payment
         if (!productRequest.getPaid()) {
-            log.warn("⚠️ [ProductRequestService] Attempt to access unpaid ProductRequest — " +
+            log.warn("⚠️ [ProductRequestService] Attempt to access unconfirmed ProductRequest — " +
                     "productRequestId: {}, userId: {}", productRequestId, userId);
-            throw new RuntimeException("Payment not completed for this product request");
+            throw new ApiException("Payment not yet confirmed for this product request");
         }
 
         log.info("✅ [ProductRequestService] ProductRequest fetched — " +
@@ -165,7 +176,9 @@ public class ProductRequestService {
                 .userEmail(pr.getUser().getEmail())
                 .amount(pr.getAmount())
                 .paid(pr.getPaid())
-                .paystackReference(pr.getPaystackReference())
+                .senderAccountName(pr.getSenderAccountName())
+                .senderPhoneNumber(pr.getSenderPhoneNumber())
+                .screenshotUrl(pr.getScreenshotUrl())
                 .approvalStatus(pr.getApprovalStatus())
                 .hasProduct(pr.getUserProduct() != null)
                 .createdAt(pr.getCreatedAt())

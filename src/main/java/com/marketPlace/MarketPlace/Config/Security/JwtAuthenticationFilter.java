@@ -1,3 +1,4 @@
+// JwtAuthenticationFilter.java
 package com.marketPlace.MarketPlace.Config.Security;
 
 import com.marketPlace.MarketPlace.entity.Repo.SellerRepo;
@@ -29,27 +30,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
+        String method = request.getMethod();
 
-        return path.startsWith("/api/v1/users/register") ||
-                path.startsWith("/api/v1/users/login") ||
-                path.startsWith("/api/v1/sellers/register") ||
-                path.startsWith("/api/v1/sellers/login") ||
+        return  // Auth
+                path.startsWith("/api/v1/users/register") ||
+                        path.startsWith("/api/v1/users/login")    ||
+                        path.startsWith("/api/v1/sellers/register") ||
+                        path.startsWith("/api/v1/sellers/login")  ||
 
-                path.startsWith("/api/v1/payments/orders/webhook") ||
-                path.startsWith("/api/v1/payments/product-listing/webhook") ||
+                        // Webhooks
+                        path.startsWith("/api/v1/payments/orders/webhook") ||
+                        path.startsWith("/api/v1/payments/product-listing/webhook") ||
 
-                path.startsWith("/api/v1/products") ||
-                path.startsWith("/api/v1/payments/orders/verify") ||
-                path.startsWith("/api/v1/payments/product-listing/verify") ||
+                        // Public GET — products only (verify/* routes removed: no longer public)
+                        ("GET".equalsIgnoreCase(method) && path.startsWith("/api/v1/products")) ||
 
-                path.startsWith("/api/v1/auth") ||
-                path.startsWith("/error") ||
-                path.startsWith("/actuator") ||
-                path.startsWith("/ws") ||
-                path.startsWith("/ws-meeting") ||
-                path.equals("/favicon.ico") ||
-                path.startsWith("/.well-known") ||
-                path.startsWith("/test");
+                        // Infrastructure
+                        path.startsWith("/api/v1/auth")    ||
+                        path.startsWith("/error")           ||
+                        path.startsWith("/actuator")        ||
+                        path.startsWith("/ws")              ||
+                        path.startsWith("/ws-meeting")      ||
+                        path.equals("/favicon.ico")         ||
+                        path.startsWith("/.well-known")     ||
+                        path.equals("/ping")                ||
+                        path.startsWith("/test");
     }
 
     @Override
@@ -60,7 +65,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         var existingAuth = SecurityContextHolder.getContext().getAuthentication();
 
-        // Skip if already authenticated
         if (existingAuth != null
                 && existingAuth.isAuthenticated()
                 && !(existingAuth instanceof AnonymousAuthenticationToken)) {
@@ -77,33 +81,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
             String token = header.substring(7);
-
             String email = tokenService.getEmailFromAccessToken(token);
             String role  = tokenService.getRoleFromAccessToken(token);
 
             UserDetails userDetails;
 
             if ("SELLER".equals(role)) {
-                var sellerOptional = sellerRepo.findByEmail(email);
-
-                if (sellerOptional.isEmpty()) {
-                    log.warn("❌ Seller not found: {}", email);
-                    filterChain.doFilter(request, response);
-                    return;
-                }
-
-                userDetails = new AdminPrincipal(sellerOptional.get());
+                userDetails = sellerRepo.findByEmail(email)
+                        .map(AdminPrincipal::new)
+                        .orElseGet(() -> {
+                            log.warn("❌ Seller not found for email: {}", email);
+                            return null;
+                        });
 
             } else {
-                var userOptional = userRepo.findByEmail(email);
+                userDetails = userRepo.findByEmail(email)
+                        .map(UserPrincipal::new)
+                        .orElseGet(() -> {
+                            log.warn("❌ User not found for email: {}", email);
+                            return null;
+                        });
+            }
 
-                if (userOptional.isEmpty()) {
-                    log.warn("❌ User not found: {}", email);
-                    filterChain.doFilter(request, response);
-                    return;
-                }
-
-                userDetails = new UserPrincipal(userOptional.get());
+            if (userDetails == null) {
+                filterChain.doFilter(request, response);
+                return;
             }
 
             UsernamePasswordAuthenticationToken authToken =
@@ -114,7 +116,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     );
 
             SecurityContextHolder.getContext().setAuthentication(authToken);
-
             log.info("✅ Authenticated: {} ({})", email, role);
 
         } catch (Exception e) {

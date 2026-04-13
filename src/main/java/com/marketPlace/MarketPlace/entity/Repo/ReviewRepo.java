@@ -2,7 +2,9 @@ package com.marketPlace.MarketPlace.entity.Repo;
 
 import com.marketPlace.MarketPlace.entity.Review;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +20,10 @@ public interface ReviewRepo extends JpaRepository<Review, UUID> {
 
     // Get a specific user's review on a specific product
     Optional<Review> findByProductIdAndUserId(UUID productId, UUID userId);
+
+    @Modifying
+    @Query("DELETE FROM Review r WHERE r.product.id = :productId")
+    void deleteByProductId(@Param("productId") UUID productId);
 
     // Check if user already reviewed a product (prevent duplicates)
     boolean existsByProductIdAndUserId(UUID productId, UUID userId);

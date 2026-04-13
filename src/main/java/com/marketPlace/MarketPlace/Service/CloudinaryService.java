@@ -24,7 +24,7 @@ public class CloudinaryService {
 
     private final Cloudinary cloudinary;
 
-    private static final long MAX_SIZE_BYTES  = 500 * 1024;       // 500KB
+    private static final long MAX_SIZE_BYTES  = 500 * 1024;        // 500KB
     private static final long MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
 
     // ─────────────────────────────────────────────────────────
@@ -72,6 +72,50 @@ public class CloudinaryService {
     }
 
     // ─────────────────────────────────────────────────────────
+    // UPLOAD PAYMENT SCREENSHOT
+    // Dedicated method for MoMo payment proof uploads.
+    // Stored in "payment_screenshots" folder — no compression
+    // applied since screenshots must remain clear and legible.
+    // ─────────────────────────────────────────────────────────
+    public Map<String, Object> uploadPaymentScreenshot(MultipartFile file) throws IOException {
+
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Screenshot cannot be null or empty");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IllegalArgumentException(
+                    "Invalid file type [" + contentType + "] — only image files are accepted for payment screenshots");
+        }
+
+        String uniquePublicId = "payment_screenshots/" + UUID.randomUUID();
+
+        log.info("Uploading payment screenshot: name={}, size={}KB, type={}",
+                file.getOriginalFilename(),
+                file.getSize() / 1024,
+                contentType);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> uploadResult = cloudinary.uploader().upload(
+                file.getBytes(),
+                ObjectUtils.asMap(
+                        "public_id",     uniquePublicId,
+                        "resource_type", "image",
+                        "overwrite",     false,
+                        "quality",       "auto",
+                        "fetch_format",  "auto"
+                )
+        );
+
+        log.info("Payment screenshot uploaded: public_id={}, url={}",
+                uploadResult.get("public_id"),
+                uploadResult.get("secure_url"));
+
+        return uploadResult;
+    }
+
+    // ─────────────────────────────────────────────────────────
     // DELETE IMAGE
     // ─────────────────────────────────────────────────────────
     public void deleteImage(String publicId) throws IOException {
@@ -93,7 +137,6 @@ public class CloudinaryService {
             throw new IllegalArgumentException("Video file cannot be null or empty");
         }
 
-        // Basic MIME type guard — reject anything clearly not a video
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("video/")) {
             throw new IllegalArgumentException(
@@ -118,7 +161,7 @@ public class CloudinaryService {
                 file.getBytes(),
                 ObjectUtils.asMap(
                         "public_id",     uniquePublicId,
-                        "resource_type", "video",   // must be "video" for Cloudinary to process it
+                        "resource_type", "video",
                         "overwrite",     false,
                         "quality",       "auto",
                         "fetch_format",  "auto"
@@ -146,8 +189,6 @@ public class CloudinaryService {
         }
         log.info("Deleting video from Cloudinary: {}", publicId);
 
-        // resource_type MUST be "video" — destroy() defaults to "image" and will
-        // return "not found" silently if you forget this for video public_ids
         @SuppressWarnings("unchecked")
         Map<String, Object> result = cloudinary.uploader().destroy(
                 publicId,
@@ -196,7 +237,6 @@ public class CloudinaryService {
     // ─────────────────────────────────────────────────────────
     // PRIVATE HELPERS
     // ─────────────────────────────────────────────────────────
-
     private byte[] compressImage(byte[] originalBytes) throws IOException {
         BufferedImage bufferedImage = ImageIO.read(new ByteArrayInputStream(originalBytes));
 
@@ -205,7 +245,6 @@ public class CloudinaryService {
             return originalBytes;
         }
 
-        // Convert ARGB/transparent PNG to RGB for JPEG compression
         if (bufferedImage.getType() == BufferedImage.TYPE_4BYTE_ABGR
                 || bufferedImage.getType() == BufferedImage.TYPE_INT_ARGB) {
             BufferedImage rgbImage = new BufferedImage(

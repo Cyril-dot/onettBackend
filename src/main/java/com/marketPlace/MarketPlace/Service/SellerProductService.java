@@ -30,6 +30,10 @@ public class SellerProductService {
     private final OrderItemRepo orderItemRepo;
     private final ProductVideoRepository      productVideoRepo;
     private final SellerRepo            sellerRepo;
+    private final CartRepo              cartRepo;
+    private final PreOrderRecordRepo   preOrderRecordRepo;
+    private final ReviewRepo reviewRepo;
+    private final ProductRequestRepository productRequestRepository;
     private final ProductCategoryRepo   categoryRepo;
     private final CategoryIconRepo      categoryIconRepo;
     private final CloudinaryService     cloudinaryService;
@@ -408,36 +412,68 @@ public class SellerProductService {
 
     @Transactional
     public String deleteProduct(UUID productId, UUID sellerId) throws IOException {
+
         Product product = findProductById(productId);
         validateSellerOwnsProduct(product, sellerId);
 
-        // ── Nullify product reference in order_items ──────────────
-        orderItemRepo.nullifyProductReference(productId);
+        String productName = product.getName(); // capture before deletion
 
-        // ── Delete images from Cloudinary ─────────────────────────
+        log.info("🗑️  [deleteProduct] Starting deletion of product [{}] — '{}'", productId, productName);
+
+        // ── 1. Delete images from Cloudinary + DB ────────────────────────────
         for (ProductImage img : product.getImages()) {
-            try { cloudinaryService.deleteImage(img.getImagePublicId()); }
-            catch (Exception e) { log.warn("Failed to delete image [{}]: {}", img.getImagePublicId(), e.getMessage()); }
+            try {
+                cloudinaryService.deleteImage(img.getImagePublicId());
+            } catch (Exception e) {
+                log.warn("Failed to delete image [{}] from Cloudinary: {}", img.getImagePublicId(), e.getMessage());
+            }
         }
         productImageRepo.deleteByProductId(productId);
         product.getImages().clear();
+        log.debug("[deleteProduct] Images cleaned for product [{}]", productId);
 
-        // ── Delete video ──────────────────────────────────────────
+        // ── 2. Delete video from Cloudinary + DB ─────────────────────────────
         if (product.getProductVideo() != null) {
-            try { deleteVideoFromCloudinaryAndDb(product); }
-            catch (Exception e) { log.warn("Failed to delete video for product [{}]: {}", productId, e.getMessage()); }
+            try {
+                deleteVideoFromCloudinaryAndDb(product);
+            } catch (Exception e) {
+                log.warn("Failed to delete video for product [{}]: {}", productId, e.getMessage());
+            }
         }
+        log.debug("[deleteProduct] Video cleaned for product [{}]", productId);
 
-        // ── Unlink category ───────────────────────────────────────
+        // ── 3. Remove cart items ──────────────────────────────────────────────
+        int cartRowsDeleted = cartRepo.deleteByProductId(productId);
+        log.debug("[deleteProduct] Removed {} cart item(s) for product [{}]", cartRowsDeleted, productId);
+
+        // ── 4. Nullify order item product references ──────────────────────────
+        orderItemRepo.nullifyProductReference(productId);
+        log.debug("[deleteProduct] Nullified order_item product refs for product [{}]", productId);
+
+        // ── 5. Nullify pre-order record product references ────────────────────
+        // Pre-orders are financial records — preserve for auditing, just null the FK.
+        preOrderRecordRepo.nullifyProductReference(productId);
+        log.debug("[deleteProduct] Nullified pre_order_record product refs for product [{}]", productId);
+
+        // ── 6. Delete reviews / ratings ───────────────────────────────────────
+        reviewRepo.deleteByProductId(productId);
+        log.debug("[deleteProduct] Deleted reviews for product [{}]", productId);
+
+        // ── 7. Unlink category ────────────────────────────────────────────────
         categoryRepo.findByProductId(productId).ifPresent(cat -> {
             cat.setProduct(null);
             categoryRepo.save(cat);
         });
+        log.debug("[deleteProduct] Unlinked category for product [{}]", productId);
 
+        // ── 9. Final delete ───────────────────────────────────────────────────
         productRepo.delete(product);
-        log.info("Product deleted: [{}]", product.getName());
-        return "Product '" + product.getName() + "' deleted successfully";
+
+        log.info("✅ [deleteProduct] Product [{}] '{}' fully deleted by seller [{}]", productId, productName, sellerId);
+
+        return "Product '" + productName + "' deleted successfully";
     }
+
     // ═══════════════════════════════════════════════════════════
     //  READ / VIEW OPERATIONS
     // ═══════════════════════════════════════════════════════════

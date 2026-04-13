@@ -9,11 +9,13 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PaymentInitResponse {
-    private String     authorizationUrl;
-    private String     accessCode;
-    private String     reference;
+
     private UUID       orderId;
+    private String     paymentStatus;
+    private BigDecimal amount;
     private boolean    isPreOrder;
-    private BigDecimal depositAmount;    // null for normal orders
-    private BigDecimal remainingAmount;  // null for normal orders
+    private BigDecimal depositAmount;    // only set for pre-orders
+    private BigDecimal remainingAmount;  // only set for pre-orders
+    private String     screenshotUrl;
+    private String     message;
 }

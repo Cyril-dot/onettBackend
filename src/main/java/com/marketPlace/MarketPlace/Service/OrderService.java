@@ -2,7 +2,6 @@ package com.marketPlace.MarketPlace.Service;
 
 import com.marketPlace.MarketPlace.dtos.*;
 import com.marketPlace.MarketPlace.entity.*;
-import com.marketPlace.MarketPlace.entity.Enums.NotificationType;
 import com.marketPlace.MarketPlace.entity.Enums.OrderStatus;
 import com.marketPlace.MarketPlace.entity.Enums.PaymentStatus;
 import com.marketPlace.MarketPlace.entity.Enums.StockStatus;
@@ -92,7 +91,7 @@ public class OrderService {
         for (Cart cart : cartItems) {
             Product product = cart.getProduct();
 
-            // FIX: null-safe Boolean check — prevents NPE and ensures discount is always applied correctly
+            // null-safe Boolean check — prevents NPE and ensures discount is always applied correctly
             boolean isDiscounted = Boolean.TRUE.equals(product.getDiscounted());
             BigDecimal discountPrice = product.getDiscountPrice();
             BigDecimal unitPrice = (isDiscounted && discountPrice != null)
@@ -123,6 +122,9 @@ public class OrderService {
 
         log.info("Order [{}] initiated for user [{}] — total: {} — chargeAmount: {} — preOrder: {}",
                 savedOrder.getId(), user.getEmail(), total, chargeAmount, isPreOrder);
+
+        // Notify admin that a new order has been placed
+        notificationService.notifyAdminSellerOrderPlaced(savedOrder);
 
         return OrderInitResponse.builder()
                 .orderId(savedOrder.getId())
@@ -524,8 +526,10 @@ public class OrderService {
     }
 
     private OrderResponse mapToOrderResponse(Order order) {
+        // FIX: getPaystackReference() does not exist — this is a MoMo screenshot-based payment system.
+        // Using getScreenshotUrl() as the payment reference instead.
         String paymentReference = paymentRepo.findByOrderId(order.getId())
-                .map(Payment::getPaystackReference)
+                .map(Payment::getScreenshotUrl)
                 .orElse(null);
 
         PaymentStatus paymentStatus = paymentRepo.findByOrderId(order.getId())

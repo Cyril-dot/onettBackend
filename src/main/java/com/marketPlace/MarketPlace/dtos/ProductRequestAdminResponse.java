@@ -12,25 +12,21 @@ import java.util.UUID;
 
 @Data
 @Builder
-@NoArgsConstructor
 @AllArgsConstructor
-public class ProductRequestPayload {
+@NoArgsConstructor
+public class ProductRequestAdminResponse {
 
     private UUID           id;
     private UUID           userId;
+    private String         userFullName;
     private String         userEmail;
     private BigDecimal     amount;
     private Boolean        paid;
-
-    // ── MoMo sender details ──────────────────────────────────────
+    private ApprovalStatus approvalStatus;
     private String         senderAccountName;
     private String         senderPhoneNumber;
     private String         screenshotUrl;
-
-    // ── Status ───────────────────────────────────────────────────
-    private ApprovalStatus approvalStatus;
-    private boolean        hasProduct;
-
+    private String         adminNote;
     private LocalDateTime  createdAt;
     private LocalDateTime  updatedAt;
 }

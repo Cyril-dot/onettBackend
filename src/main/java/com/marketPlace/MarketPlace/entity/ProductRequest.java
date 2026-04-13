@@ -13,12 +13,10 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-
 @AllArgsConstructor
 @NoArgsConstructor
 @Data
 @Builder
-// ProductRequest - payment first, no product yet
 @Entity
 @Table(name = "product_request")
 public class ProductRequest {
@@ -38,14 +36,34 @@ public class ProductRequest {
     @Builder.Default
     private Boolean paid = false;
 
-    private String paystackReference;
+    // --- Sender Info (customer who made the MoMo payment) ---
+
+    @Column(name = "sender_account_name", nullable = false, length = 150)
+    private String senderAccountName;   // Name on the MoMo account that sent the money
+
+    @Column(name = "sender_phone_number", nullable = false, length = 20)
+    private String senderPhoneNumber;   // MoMo number that sent the money
+
+    // --- Payment Proof (Cloudinary) ---
+
+    @Column(name = "screenshot_url", nullable = false, length = 500)
+    private String screenshotUrl;       // Cloudinary secure URL
+
+    @Column(name = "screenshot_public_id", nullable = false, length = 200)
+    private String screenshotPublicId;  // Cloudinary public_id (for deletion/replacement)
+
+    // --- Admin Review ---
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
     private ApprovalStatus approvalStatus = ApprovalStatus.PENDING;
 
-    // Nullable — product is uploaded AFTER payment
+    @Column(name = "admin_note", length = 300)
+    private String adminNote;           // Reason for rejection or confirmation note
+
+    // --- Product (uploaded AFTER payment is confirmed) ---
+
     @OneToOne(mappedBy = "productRequest", fetch = FetchType.LAZY)
     private UserProduct userProduct;
 

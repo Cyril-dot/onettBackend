@@ -3,6 +3,7 @@ package com.marketPlace.MarketPlace.entity.Repo;
 import com.marketPlace.MarketPlace.entity.PreOrderRecord;
 import com.marketPlace.MarketPlace.entity.Enums.PreOrderStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -18,6 +19,10 @@ public interface PreOrderRecordRepo extends JpaRepository<PreOrderRecord, UUID> 
     List<PreOrderRecord> findByProductIdAndStatus(UUID productId, PreOrderStatus status);
 
     List<PreOrderRecord> findByStatus(PreOrderStatus status);
+
+    @Modifying
+    @Query("UPDATE PreOrderRecord p SET p.product = null WHERE p.product.id = :productId")
+    void nullifyProductReference(@Param("productId") UUID productId);
 
     // Admin: all pre-order records across all products, joined with user info
     @Query("SELECT p FROM PreOrderRecord p " +

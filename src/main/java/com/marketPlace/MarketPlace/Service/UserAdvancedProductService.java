@@ -478,15 +478,21 @@ public class UserAdvancedProductService {
 
 
     private ProductRequestPayload mapToPayload(ProductRequest request) {
+        if (request == null) return null;
+
         return ProductRequestPayload.builder()
                 .id(request.getId())
                 .userId(request.getUser().getId())
                 .userEmail(request.getUser().getEmail())
                 .amount(request.getAmount())
                 .paid(request.getPaid())
-                .paystackReference(request.getPaystackReference())
-                .hasProduct(request.getUserProduct() != null)
+                // MoMo sender details
+                .senderAccountName(request.getSenderAccountName())
+                .senderPhoneNumber(request.getSenderPhoneNumber())
+                .screenshotUrl(request.getScreenshotUrl())
+                // Status
                 .approvalStatus(request.getApprovalStatus())
+                .hasProduct(request.getUserProduct() != null)
                 .createdAt(request.getCreatedAt())
                 .updatedAt(request.getUpdatedAt())
                 .build();

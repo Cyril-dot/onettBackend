@@ -1,259 +1,208 @@
 package com.marketPlace.MarketPlace.Service;
 
-import com.marketPlace.MarketPlace.dtos.PaystackInitiatePayload;
-import com.marketPlace.MarketPlace.dtos.PaystackVerifyPayload;
+import com.marketPlace.MarketPlace.dtos.ProductListingPaymentResponse;
+import com.marketPlace.MarketPlace.dtos.ProductRequestAdminResponse;
+import com.marketPlace.MarketPlace.entity.Enums.ApprovalStatus;
 import com.marketPlace.MarketPlace.entity.ProductRequest;
 import com.marketPlace.MarketPlace.entity.Repo.ProductRequestRepository;
 import com.marketPlace.MarketPlace.entity.Repo.UserRepo;
 import com.marketPlace.MarketPlace.entity.User;
+import com.marketPlace.MarketPlace.exception.ApiException;
+import com.marketPlace.MarketPlace.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class PaystackService {
 
     private final ProductRequestRepository productRequestRepository;
-    private final UserRepo userRepository;
-    private final RestTemplate restTemplate;
+    private final UserRepo                 userRepository;
+    private final CloudinaryService        cloudinaryService;
+    private final NotificationService      notificationService;
 
-    @Value("${paystack.secret.key}")
-    private String paystackSecretKey;
-
-    @Value("${paystack.base.url}")
-    private String paystackBaseUrl;
-
-    @Value("${paystack.callback.url}")
-    private String callbackUrl;
-
+    private static final BigDecimal LISTING_FEE = BigDecimal.valueOf(100.00);
 
     // ════════════════════════════════════════════════════════════════
-    // STEP 1 — User initiates payment to request a product listing
+    // STEP 1 — User submits MoMo payment proof for product listing fee
     // ════════════════════════════════════════════════════════════════
 
-    public PaystackInitiatePayload initiatePayment(UUID userId) {
+    @Transactional
+    public ProductListingPaymentResponse submitListingPayment(UUID userId,
+                                                              String senderAccountName,
+                                                              String senderPhoneNumber,
+                                                              MultipartFile screenshot) {
 
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
 
-        // flat fee — always 100 GHS
-        BigDecimal amount = BigDecimal.valueOf(100.00);
-        int amountInPesewas = 10000; // Paystack uses smallest unit (pesewas for GHS)
-
-        String reference = "MKT_" + UUID.randomUUID().toString()
-                .replace("-", "").substring(0, 16).toUpperCase();
-
-        Map<String, Object> paystackBody = new HashMap<>();
-        paystackBody.put("email",        user.getEmail());
-        paystackBody.put("amount",       amountInPesewas);
-        paystackBody.put("currency",     "GHS");
-        paystackBody.put("reference",    reference);
-        paystackBody.put("callback_url", callbackUrl);
-        paystackBody.put("metadata", Map.of(
-                "userId",  user.getId().toString(),
-                "purpose", "PRODUCT_LISTING"
-        ));
-
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(paystackBody, buildHeaders());
-
+        // ── Upload screenshot to Cloudinary ───────────────────────────────────
+        String screenshotUrl;
+        String screenshotPublicId;
         try {
-            ResponseEntity<Map> response = restTemplate.postForEntity(
-                    paystackBaseUrl + "/transaction/initialize", entity, Map.class);
-
-            Map responseBody = response.getBody();
-            if (responseBody == null || !(Boolean) responseBody.get("status")) {
-                throw new RuntimeException("Paystack initialization failed");
-            }
-
-            Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
-            String authorizationUrl  = (String) data.get("authorization_url");
-            String accessCode        = (String) data.get("access_code");
-
-            // Save ProductRequest immediately as PENDING
-            ProductRequest productRequest = ProductRequest.builder()
-                    .user(user)
-                    .amount(amount)
-                    .paid(false)
-                    .paystackReference(reference)
-                    .build();
-
-            productRequestRepository.save(productRequest);
-
-            log.info("✅ Payment initiated — User: {}, Ref: {}, Amount: 100 GHS",
-                    user.getEmail(), reference);
-
-            return PaystackInitiatePayload.builder()
-                    .reference(reference)
-                    .authorizationUrl(authorizationUrl)
-                    .accessCode(accessCode)
-                    .amount(amount)
-                    .currency("GHS")
-                    .email(user.getEmail())
-                    .build();
-
+            Map uploadResult   = cloudinaryService.uploadPaymentScreenshot(screenshot);
+            screenshotUrl      = (String) uploadResult.get("secure_url");
+            screenshotPublicId = (String) uploadResult.get("public_id");
         } catch (Exception e) {
-            log.error("❌ Paystack init failed: {}", e.getMessage());
-            throw new RuntimeException("Payment initialization failed. Please try again.");
+            log.error("Cloudinary upload failed for user [{}]: {}", userId, e.getMessage());
+            throw new ApiException("Screenshot upload failed — please try again");
         }
+
+        // ── Save ProductRequest as unpaid (pending admin confirmation) ─────────
+        ProductRequest productRequest = ProductRequest.builder()
+                .user(user)
+                .amount(LISTING_FEE)
+                .paid(false)
+                .approvalStatus(ApprovalStatus.PENDING)
+                .senderAccountName(senderAccountName)
+                .senderPhoneNumber(senderPhoneNumber)
+                .screenshotUrl(screenshotUrl)
+                .screenshotPublicId(screenshotPublicId)
+                .build();
+
+        productRequestRepository.save(productRequest);
+
+        // ── Notify user (submitted) + notify all admins ────────────────────────
+        notificationService.notifyProductRequestSubmitted(user, productRequest.getId());
+        notificationService.notifyAdminNewListingPaymentSubmitted(
+                user, productRequest.getId(), senderAccountName, senderPhoneNumber);
+
+        log.info("Listing payment submitted — User: {}, Sender: {}, Amount: 100 GHS",
+                user.getEmail(), senderAccountName);
+
+        return ProductListingPaymentResponse.builder()
+                .productRequestId(productRequest.getId())
+                .screenshotUrl(screenshotUrl)
+                .amount(LISTING_FEE)
+                .message("Payment submitted. Awaiting admin confirmation before you can upload your product.")
+                .build();
     }
 
-
     // ════════════════════════════════════════════════════════════════
-    // STEP 2 — Verify payment (frontend redirect or webhook)
+    // STEP 2 — Admin confirms listing payment
     // ════════════════════════════════════════════════════════════════
 
-    public PaystackVerifyPayload verifyPayment(String reference) {
-
-        // Idempotency — already verified, return early
-        ProductRequest productRequest = productRequestRepository
-                .findByPaystackReference(reference)
-                .orElse(null);
-
-        if (productRequest == null) {
-            log.warn("⚠️ ProductRequest not found for ref: {} — may still be processing", reference);
-            return PaystackVerifyPayload.builder()
-                    .reference(reference)
-                    .status("pending")
-                    .message("Payment is still processing. Please wait and try again.")
-                    .paid(false)
-                    .build();
-        }
+    @Transactional
+    public void confirmListingPayment(UUID productRequestId) {
+        ProductRequest productRequest = productRequestRepository.findById(productRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ProductRequest not found: " + productRequestId));
 
         if (productRequest.getPaid()) {
-            log.info("⏩ Payment {} already verified — returning cached result", reference);
-            return PaystackVerifyPayload.builder()
-                    .reference(reference)
-                    .status("success")
-                    .message("Payment already verified. You can now upload your product.")
-                    .paid(true)
-                    .productRequestId(productRequest.getId())
-                    .build();
+            log.info("ProductRequest [{}] already confirmed — skipping", productRequestId);
+            return;
         }
 
-        // Call Paystack to verify
-        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders());
+        productRequest.setPaid(true);
+        productRequest.setApprovalStatus(ApprovalStatus.APPROVED);
+        productRequestRepository.save(productRequest);
 
-        try {
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    paystackBaseUrl + "/transaction/verify/" + reference,
-                    HttpMethod.GET, entity, Map.class);
+        // ── Notify user their request was approved ─────────────────────────────
+        notificationService.notifyProductRequestApproved(
+                productRequest.getUser(), productRequestId);
 
-            Map responseBody = response.getBody();
-            if (responseBody == null || !(Boolean) responseBody.get("status")) {
-                throw new RuntimeException("Paystack verification call failed");
-            }
-
-            Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
-            String paystackStatus = (String) data.get("status");
-
-            if ("success".equals(paystackStatus)) {
-                productRequest.setPaid(true);
-                productRequestRepository.save(productRequest);
-
-                log.info("✅ Payment verified — Ref: {}, User: {}",
-                        reference, productRequest.getUser().getEmail());
-
-                return PaystackVerifyPayload.builder()
-                        .reference(reference)
-                        .status("success")
-                        .message("Payment successful! You can now upload your product.")
-                        .paid(true)
-                        .productRequestId(productRequest.getId())
-                        .build();
-
-            } else {
-                log.warn("❌ Payment failed — Ref: {}, Status: {}", reference, paystackStatus);
-                return PaystackVerifyPayload.builder()
-                        .reference(reference)
-                        .status("failed")
-                        .message("Payment failed. Please try again.")
-                        .paid(false)
-                        .build();
-            }
-
-        } catch (Exception e) {
-            log.error("❌ Verification error for ref {}: {}", reference, e.getMessage());
-            throw new RuntimeException("Payment verification failed. Contact support.");
-        }
+        log.info("Listing payment CONFIRMED for ProductRequest [{}] — User: {}",
+                productRequestId, productRequest.getUser().getEmail());
     }
 
-
     // ════════════════════════════════════════════════════════════════
-    // STEP 3 — Paystack Webhook (charge.success)
+    // STEP 3 — Admin rejects listing payment
     // ════════════════════════════════════════════════════════════════
 
-    public void handleWebhook(Map<String, Object> payload, String rawBody, String signature) {
-        if (!isValidSignature(rawBody, signature)) {
-            log.warn("⚠️ Invalid Paystack webhook signature — rejecting");
-            throw new RuntimeException("Invalid webhook signature");
-        }
+    @Transactional
+    public void rejectListingPayment(UUID productRequestId, String reason) {
+        ProductRequest productRequest = productRequestRepository.findById(productRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ProductRequest not found: " + productRequestId));
 
-        String event = (String) payload.get("event");
-        log.info("📩 Webhook received: {}", event);
+        productRequest.setPaid(false);
+        productRequest.setApprovalStatus(ApprovalStatus.REJECTED);
+        productRequest.setAdminNote(reason);
+        productRequestRepository.save(productRequest);
 
-        if ("charge.success".equals(event)) {
-            Map<String, Object> data = (Map<String, Object>) payload.get("data");
-            String reference = (String) data.get("reference");
+        // ── Notify user their request was rejected ─────────────────────────────
+        notificationService.notifyProductRequestRejected(
+                productRequest.getUser(), productRequestId, reason);
 
-            // Skip if already processed
-            productRequestRepository.findByPaystackReference(reference)
-                    .filter(ProductRequest::getPaid)
-                    .ifPresent(pr -> {
-                        log.info("⏩ Webhook: {} already processed — skipping", reference);
-                        return;
-                    });
+        // ── Notify admins for audit trail ──────────────────────────────────────
+        notificationService.notifyAdminListingPaymentRejected(
+                productRequest.getUser(), productRequestId, reason);
 
-            try {
-                verifyPayment(reference);
-                log.info("✅ Webhook processed for ref: {}", reference);
-            } catch (Exception e) {
-                log.error("❌ Webhook processing failed for ref {}: {}", reference, e.getMessage());
-            }
-        }
+        log.warn("Listing payment REJECTED for ProductRequest [{}] — Reason: {}",
+                productRequestId, reason);
     }
 
-
     // ════════════════════════════════════════════════════════════════
-    // PRIVATE HELPERS
+    // ADMIN — View all payment requests (paginated)
     // ════════════════════════════════════════════════════════════════
 
-    private HttpHeaders buildHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(paystackSecretKey);
-        return headers;
+    public Page<ProductRequestAdminResponse> getAllPaymentRequests(Pageable pageable) {
+        return productRequestRepository.findAllByOrderByCreatedAtDesc(pageable)
+                .map(this::mapToAdminResponse);
     }
 
-    private boolean isValidSignature(String rawBody, String signature) {
-        try {
-            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA512");
-            mac.init(new javax.crypto.spec.SecretKeySpec(
-                    paystackSecretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                    "HmacSHA512"));
+    // ════════════════════════════════════════════════════════════════
+    // ADMIN — View requests filtered by approval status
+    // ════════════════════════════════════════════════════════════════
 
-            byte[] hashBytes = mac.doFinal(
-                    rawBody.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    public Page<ProductRequestAdminResponse> getPaymentRequestsByStatus(ApprovalStatus status,
+                                                                        Pageable pageable) {
+        return productRequestRepository.findByApprovalStatus(status, pageable)
+                .map(this::mapToAdminResponse);
+    }
 
-            StringBuilder hexHash = new StringBuilder();
-            for (byte b : hashBytes) hexHash.append(String.format("%02x", b));
+    // ════════════════════════════════════════════════════════════════
+    // ADMIN — View single payment request by ID
+    // ════════════════════════════════════════════════════════════════
 
-            boolean valid = hexHash.toString().equals(signature);
-            if (!valid) log.warn("⚠️ HMAC mismatch — computed: {}, received: {}", hexHash, signature);
-            return valid;
+    public ProductRequestAdminResponse getPaymentRequestById(UUID productRequestId) {
+        ProductRequest productRequest = productRequestRepository.findById(productRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ProductRequest not found: " + productRequestId));
+        return mapToAdminResponse(productRequest);
+    }
 
-        } catch (Exception e) {
-            log.error("❌ Signature validation error: {}", e.getMessage());
-            return false;
-        }
+    // ════════════════════════════════════════════════════════════════
+    // ADMIN — Dashboard counts by status
+    // ════════════════════════════════════════════════════════════════
+
+    public Map<String, Long> getPaymentRequestCounts() {
+        return Map.of(
+                "pending",  productRequestRepository.countByApprovalStatus(ApprovalStatus.PENDING),
+                "approved", productRequestRepository.countByApprovalStatus(ApprovalStatus.APPROVED),
+                "rejected", productRequestRepository.countByApprovalStatus(ApprovalStatus.REJECTED)
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // PRIVATE — Mapper
+    // ════════════════════════════════════════════════════════════════
+
+    private ProductRequestAdminResponse mapToAdminResponse(ProductRequest pr) {
+        return ProductRequestAdminResponse.builder()
+                .id(pr.getId())
+                .userId(pr.getUser().getId())
+                .userFullName(pr.getUser().getFullName())
+                .userEmail(pr.getUser().getEmail())
+                .amount(pr.getAmount())
+                .paid(pr.getPaid())
+                .approvalStatus(pr.getApprovalStatus())
+                .senderAccountName(pr.getSenderAccountName())
+                .senderPhoneNumber(pr.getSenderPhoneNumber())
+                .screenshotUrl(pr.getScreenshotUrl())
+                .adminNote(pr.getAdminNote())
+                .createdAt(pr.getCreatedAt())
+                .updatedAt(pr.getUpdatedAt())
+                .build();
     }
 }

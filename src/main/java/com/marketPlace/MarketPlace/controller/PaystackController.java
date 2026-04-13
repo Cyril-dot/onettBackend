@@ -2,16 +2,23 @@ package com.marketPlace.MarketPlace.controller;
 
 import com.marketPlace.MarketPlace.Config.Security.UserPrincipal;
 import com.marketPlace.MarketPlace.Service.PaystackService;
-import com.marketPlace.MarketPlace.dtos.PaystackInitiatePayload;
-import com.marketPlace.MarketPlace.dtos.PaystackVerifyPayload;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.marketPlace.MarketPlace.dtos.ProductListingPaymentResponse;
+import com.marketPlace.MarketPlace.dtos.ProductRequestAdminResponse;
+import com.marketPlace.MarketPlace.entity.Enums.ApprovalStatus;
+import com.marketPlace.MarketPlace.exception.ApiException;
+import com.marketPlace.MarketPlace.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.Map;
@@ -24,103 +31,208 @@ import java.util.UUID;
 public class PaystackController {
 
     private final PaystackService paystackService;
-    private final ObjectMapper objectMapper;
 
     // ═══════════════════════════════════════════════════════════
-    // INITIATE PAYMENT (USER ONLY)
+    // USER — SUBMIT LISTING PAYMENT (MoMo screenshot)
+    // POST /api/v1/payments/product-listing/submit
     // ═══════════════════════════════════════════════════════════
 
-    @PostMapping("/initiate")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<PaystackInitiatePayload>> initiateListingPayment(
-            @AuthenticationPrincipal UserPrincipal principal) {
+    @PostMapping(value = "/submit", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ProductListingPaymentResponse>> submitListingPayment(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam("senderAccountName") String senderAccountName,
+            @RequestParam("senderPhoneNumber") String senderPhoneNumber,
+            @RequestPart("screenshot") MultipartFile screenshot) {
 
         UUID userId = principal.getUserId();
-
-        log.info("POST /payments/product-listing/initiate — user [{}]", userId);
+        log.info("POST /payments/product-listing/submit — user [{}]", userId);
 
         try {
-            PaystackInitiatePayload response = paystackService.initiatePayment(userId);
+            ProductListingPaymentResponse response = paystackService.submitListingPayment(
+                    userId, senderAccountName, senderPhoneNumber, screenshot);
+
+            log.info("POST /payments/product-listing/submit — SUCCESS | requestId [{}]",
+                    response.getProductRequestId());
 
             return ResponseEntity.ok(ApiResponse.success(
-                    "Payment initialized — redirect user to authorization URL",
-                    response
-            ));
+                    "Payment submitted. Awaiting admin confirmation.", response));
 
-        } catch (RuntimeException ex) {
-            log.warn("INITIATE FAILED for user [{}]: {}", userId, ex.getMessage());
+        } catch (ResourceNotFoundException ex) {
+            log.warn("POST /payments/product-listing/submit — NOT FOUND: {}", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.error(ex.getMessage()));
 
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
+        } catch (ApiException ex) {
+            log.warn("POST /payments/product-listing/submit — BAD REQUEST: {}", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(ApiResponse.error(ex.getMessage()));
         }
     }
 
     // ═══════════════════════════════════════════════════════════
-    // VERIFY PAYMENT (PUBLIC)
+    // SELLER — GET ALL PAYMENT REQUESTS (paginated)
+    // GET /api/v1/payments/product-listing/admin/all
     // ═══════════════════════════════════════════════════════════
 
-    @GetMapping("/verify/{reference}")
-    public ResponseEntity<ApiResponse<PaystackVerifyPayload>> verifyListingPayment(
-            @PathVariable String reference) {
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/admin/all")
+    public ResponseEntity<ApiResponse<Page<ProductRequestAdminResponse>>> getAllPaymentRequests(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
 
-        log.info("GET /payments/product-listing/verify/{}", reference);
+        log.info("GET /payments/product-listing/admin/all — seller [{}]", principal.getUserId());
+
+        Page<ProductRequestAdminResponse> page = paystackService.getAllPaymentRequests(pageable);
+
+        log.info("GET /payments/product-listing/admin/all — returned {} record(s)",
+                page.getTotalElements());
+
+        return ResponseEntity.ok(ApiResponse.success(
+                page.getTotalElements() + " request(s) found", page));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SELLER — GET PAYMENT REQUESTS BY STATUS (paginated)
+    // GET /api/v1/payments/product-listing/admin?status=PENDING
+    // ═══════════════════════════════════════════════════════════
+
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<Page<ProductRequestAdminResponse>>> getPaymentRequestsByStatus(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam ApprovalStatus status,
+            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
+
+        log.info("GET /payments/product-listing/admin?status={} — seller [{}]",
+                status, principal.getUserId());
+
+        Page<ProductRequestAdminResponse> page =
+                paystackService.getPaymentRequestsByStatus(status, pageable);
+
+        log.info("GET /payments/product-listing/admin?status={} — returned {} record(s)",
+                status, page.getTotalElements());
+
+        return ResponseEntity.ok(ApiResponse.success(
+                page.getTotalElements() + " request(s) with status " + status, page));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SELLER — GET SINGLE PAYMENT REQUEST BY ID
+    // GET /api/v1/payments/product-listing/admin/{productRequestId}
+    // ═══════════════════════════════════════════════════════════
+
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/admin/{productRequestId}")
+    public ResponseEntity<ApiResponse<ProductRequestAdminResponse>> getPaymentRequestById(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID productRequestId) {
+
+        log.info("GET /payments/product-listing/admin/{} — seller [{}]",
+                productRequestId, principal.getUserId());
 
         try {
-            PaystackVerifyPayload response = paystackService.verifyPayment(reference);
+            ProductRequestAdminResponse response =
+                    paystackService.getPaymentRequestById(productRequestId);
 
-            boolean paid = Boolean.TRUE.equals(response.getPaid());
+            return ResponseEntity.ok(ApiResponse.success("Payment request found", response));
 
-            String message;
-            if (paid) {
-                message = "Payment verified — product listing request approved";
-            } else if ("pending".equalsIgnoreCase(response.getStatus())) {
-                message = "Payment still processing — please try again shortly";
-            } else {
-                message = "Payment verification failed";
-            }
-
-            return ResponseEntity.ok(ApiResponse.success(message, response));
-
-        } catch (RuntimeException ex) {
-            log.warn("VERIFY FAILED for ref [{}]: {}", reference, ex.getMessage());
-
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
+        } catch (ResourceNotFoundException ex) {
+            log.warn("GET /payments/product-listing/admin/{} — NOT FOUND: {}",
+                    productRequestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ApiResponse.error(ex.getMessage()));
         }
     }
 
     // ═══════════════════════════════════════════════════════════
-    // WEBHOOK (PUBLIC - PAYSTACK)
+    // SELLER — GET DASHBOARD COUNTS BY STATUS
+    // GET /api/v1/payments/product-listing/admin/counts
     // ═══════════════════════════════════════════════════════════
 
-    @PostMapping("/webhook")
-    public ResponseEntity<ApiResponse<Void>> handleWebhook(
-            @RequestBody String payload,
-            @RequestHeader("x-paystack-signature") String paystackSignature) {
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/admin/counts")
+    public ResponseEntity<ApiResponse<Map<String, Long>>> getPaymentRequestCounts(
+            @AuthenticationPrincipal UserPrincipal principal) {
 
-        log.info("WEBHOOK RECEIVED — signature present: {}",
-                paystackSignature != null && !paystackSignature.isBlank());
+        log.info("GET /payments/product-listing/admin/counts — seller [{}]", principal.getUserId());
+
+        Map<String, Long> counts = paystackService.getPaymentRequestCounts();
+
+        return ResponseEntity.ok(ApiResponse.success("Payment request counts", counts));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SELLER — CONFIRM LISTING PAYMENT
+    // POST /api/v1/payments/product-listing/admin/{productRequestId}/confirm
+    // ═══════════════════════════════════════════════════════════
+
+    @PreAuthorize("hasRole('SELLER')")
+    @PostMapping("/admin/{productRequestId}/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmListingPayment(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID productRequestId) {
+
+        log.info("POST /payments/product-listing/admin/{}/confirm — seller [{}]",
+                productRequestId, principal.getUserId());
 
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> parsedPayload = objectMapper.readValue(payload, Map.class);
+            paystackService.confirmListingPayment(productRequestId);
 
-            String eventType = (String) parsedPayload.get("event");
-            log.info("WEBHOOK EVENT: [{}]", eventType);
+            log.info("POST /payments/product-listing/admin/{}/confirm — CONFIRMED",
+                    productRequestId);
 
-            paystackService.handleWebhook(parsedPayload, payload, paystackSignature);
+            return ResponseEntity.ok(ApiResponse.success(
+                    "Listing payment confirmed successfully.", null));
 
-            return ResponseEntity.ok(ApiResponse.success("Webhook processed", null));
+        } catch (ResourceNotFoundException ex) {
+            log.warn("POST /payments/product-listing/admin/{}/confirm — NOT FOUND: {}",
+                    productRequestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.error(ex.getMessage()));
 
-        } catch (RuntimeException ex) {
-            log.error("WEBHOOK REJECTED: {}", ex.getMessage());
-            return ResponseEntity.ok(ApiResponse.error(ex.getMessage()));
+        } catch (ApiException ex) {
+            log.warn("POST /payments/product-listing/admin/{}/confirm — BAD REQUEST: {}",
+                    productRequestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(ex.getMessage()));
+        }
+    }
 
-        } catch (Exception ex) {
-            log.error("WEBHOOK PARSE ERROR: {}", ex.getMessage());
-            return ResponseEntity.ok(ApiResponse.error("Failed to parse webhook payload"));
+    // ═══════════════════════════════════════════════════════════
+    // SELLER — REJECT LISTING PAYMENT
+    // POST /api/v1/payments/product-listing/admin/{productRequestId}/reject
+    // ═══════════════════════════════════════════════════════════
+
+    @PreAuthorize("hasRole('SELLER')")
+    @PostMapping("/admin/{productRequestId}/reject")
+    public ResponseEntity<ApiResponse<Void>> rejectListingPayment(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID productRequestId,
+            @RequestParam(required = false) String reason) {
+
+        log.info("POST /payments/product-listing/admin/{}/reject — seller [{}]",
+                productRequestId, principal.getUserId());
+
+        try {
+            paystackService.rejectListingPayment(productRequestId, reason);
+
+            log.warn("POST /payments/product-listing/admin/{}/reject — REJECTED | reason: {}",
+                    productRequestId, reason);
+
+            return ResponseEntity.ok(ApiResponse.success("Listing payment rejected.", null));
+
+        } catch (ResourceNotFoundException ex) {
+            log.warn("POST /payments/product-listing/admin/{}/reject — NOT FOUND: {}",
+                    productRequestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.error(ex.getMessage()));
+
+        } catch (ApiException ex) {
+            log.warn("POST /payments/product-listing/admin/{}/reject — BAD REQUEST: {}",
+                    productRequestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(ex.getMessage()));
         }
     }
 

@@ -1,3 +1,4 @@
+// SecurityConfig.java
 package com.marketPlace.MarketPlace.Config.Security;
 
 import com.marketPlace.MarketPlace.Config.Security.RateLimitingConfigs.RateLimitFilter;
@@ -44,7 +45,7 @@ public class SecurityConfig {
 
                 .authorizeHttpRequests(auth -> auth
 
-                        // 🔓 AUTH ENDPOINTS
+                        // ── AUTH ────────────────────────────────────────────────
                         .requestMatchers(
                                 "/api/v1/users/register",
                                 "/api/v1/users/login",
@@ -52,20 +53,18 @@ public class SecurityConfig {
                                 "/api/v1/sellers/login"
                         ).permitAll()
 
-                        // 🔓 PAYSTACK WEBHOOKS (NO JWT)
+                        // ── WEBHOOKS (no JWT) ───────────────────────────────────
                         .requestMatchers(
                                 "/api/v1/payments/orders/webhook",
                                 "/api/v1/payments/product-listing/webhook"
                         ).permitAll()
 
-                        // 🔓 PUBLIC GET ROUTES
+                        // ── PUBLIC GET ROUTES ───────────────────────────────────
                         .requestMatchers(HttpMethod.GET,
-                                "/api/v1/products/**",
-                                "/api/v1/payments/orders/verify/**",
-                                "/api/v1/payments/product-listing/verify/**"
+                                "/api/v1/products/**"
                         ).permitAll()
 
-                        // 🔓 GENERAL PUBLIC ROUTES
+                        // ── INFRASTRUCTURE ──────────────────────────────────────
                         .requestMatchers(
                                 "/api/v1/auth/**",
                                 "/error/**",
@@ -79,14 +78,30 @@ public class SecurityConfig {
                                 "/test/**"
                         ).permitAll()
 
-                        // 🔒 EVERYTHING ELSE
+                        // ── USER ROUTES ─────────────────────────────────────────
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/payments/orders/*/submit",
+                                "/api/v1/payments/product-listing/submit",
+                                "/api/v1/product-requests/submit"
+                        ).hasRole("USER")
+
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/product-requests/*"
+                        ).hasRole("USER")
+
+                        // ── SELLER (ADMIN) ROUTES ───────────────────────────────
+                        .requestMatchers(
+                                "/api/v1/payments/orders/admin/**",
+                                "/api/v1/payments/product-listing/admin/**"
+                        ).hasRole("SELLER")
+
+                        // ── EVERYTHING ELSE ─────────────────────────────────────
                         .anyRequest().authenticated()
                 )
 
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint((request, response, authException) -> {
                             log.warn("🚫 Unauthorized: {} {}", request.getMethod(), request.getRequestURI());
-
                             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                             response.setContentType("application/json");
                             response.getWriter().write(
@@ -96,14 +111,12 @@ public class SecurityConfig {
                         })
                 )
 
-                // ✅ FILTER ORDER
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
-    // Prevent duplicate registration
     @Bean
     public FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration(
             JwtAuthenticationFilter filter) {

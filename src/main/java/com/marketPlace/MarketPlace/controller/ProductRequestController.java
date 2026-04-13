@@ -2,9 +2,8 @@ package com.marketPlace.MarketPlace.controller;
 
 import com.marketPlace.MarketPlace.Config.Security.UserPrincipal;
 import com.marketPlace.MarketPlace.Service.ProductRequestService;
-import com.marketPlace.MarketPlace.dtos.ProductRequestInitiatePayload;
+import com.marketPlace.MarketPlace.dtos.ProductListingPaymentResponse;
 import com.marketPlace.MarketPlace.dtos.ProductRequestPayload;
-import com.marketPlace.MarketPlace.dtos.ProductRequestVerifyPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -12,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -25,13 +25,16 @@ public class ProductRequestController {
     private final ProductRequestService productRequestService;
 
     // ═══════════════════════════════════════════════════════════
-    // STEP 1 — INITIATE PAYMENT (SECURED)
+    // STEP 1 — USER: Submit MoMo payment proof
     // ═══════════════════════════════════════════════════════════
 
-    @PostMapping("/initiate")
+    @PostMapping(value = "/submit", consumes = "multipart/form-data")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<ProductRequestInitiatePayload>> initiatePayment(
-            @AuthenticationPrincipal UserPrincipal principal) {
+    public ResponseEntity<ApiResponse<ProductListingPaymentResponse>> submitListingPayment(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam("senderAccountName") String senderAccountName,
+            @RequestParam("senderPhoneNumber") String senderPhoneNumber,
+            @RequestPart("screenshot") MultipartFile screenshot) {
 
         if (principal == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -39,65 +42,84 @@ public class ProductRequestController {
         }
 
         UUID userId = principal.getUserId();
-
-        log.info("POST /product-requests/initiate — user [{}]", userId);
+        log.info("POST /product-requests/submit — user [{}]", userId);
 
         try {
-            ProductRequestInitiatePayload response =
-                    productRequestService.initiatePayment(userId);
+            ProductListingPaymentResponse response =
+                    productRequestService.submitListingPayment(
+                            userId, senderAccountName, senderPhoneNumber, screenshot);
+
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success(
+                            "Payment proof submitted — pending admin review",
+                            response));
+
+        } catch (RuntimeException ex) {
+            log.warn("Submit failed for user [{}]: {}", userId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(ex.getMessage()));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // STEP 2 — ADMIN: Confirm MoMo payment
+    // ═══════════════════════════════════════════════════════════
+
+    @PatchMapping("/{productRequestId}/confirm")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> confirmListingPayment(
+            @PathVariable UUID productRequestId) {
+
+        log.info("PATCH /product-requests/{}/confirm", productRequestId);
+
+        try {
+            productRequestService.confirmListingPayment(productRequestId);
 
             return ResponseEntity.ok(ApiResponse.success(
-                    "Payment initialized — redirect user to authorization URL",
-                    response
-            ));
+                    "Payment confirmed — user has been notified",
+                    null));
 
         } catch (RuntimeException ex) {
-            log.warn("Initiate failed for user [{}]: {}", userId, ex.getMessage());
+            log.warn("Confirm failed for productRequestId [{}]: {}",
+                    productRequestId, ex.getMessage());
 
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
+            HttpStatus status = resolveStatus(ex.getMessage());
+            return ResponseEntity.status(status)
                     .body(ApiResponse.error(ex.getMessage()));
         }
     }
 
     // ═══════════════════════════════════════════════════════════
-    // STEP 2 — VERIFY PAYMENT (PUBLIC)
+    // STEP 3 — ADMIN: Reject MoMo payment
     // ═══════════════════════════════════════════════════════════
 
-    @GetMapping("/verify/{reference}")
-    public ResponseEntity<ApiResponse<ProductRequestVerifyPayload>> verifyPayment(
-            @PathVariable String reference) {
+    @PatchMapping("/{productRequestId}/reject")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> rejectListingPayment(
+            @PathVariable UUID productRequestId,
+            @RequestParam("reason") String reason) {
 
-        log.info("GET /product-requests/verify/{}", reference);
+        log.info("PATCH /product-requests/{}/reject — reason: {}", productRequestId, reason);
 
         try {
-            ProductRequestVerifyPayload response =
-                    productRequestService.verifyPayment(reference);
+            productRequestService.rejectListingPayment(productRequestId, reason);
 
-            boolean paid = Boolean.TRUE.equals(response.getPaid());
-
-            String message;
-            if (paid) {
-                message = "Payment verified — you can now upload your product";
-            } else if ("pending".equalsIgnoreCase(response.getStatus())) {
-                message = "Payment still processing — please try again shortly";
-            } else {
-                message = "Payment verification failed — please try again";
-            }
-
-            return ResponseEntity.ok(ApiResponse.success(message, response));
+            return ResponseEntity.ok(ApiResponse.success(
+                    "Payment rejected — user has been notified",
+                    null));
 
         } catch (RuntimeException ex) {
-            log.warn("Verify failed for ref [{}]: {}", reference, ex.getMessage());
+            log.warn("Reject failed for productRequestId [{}]: {}",
+                    productRequestId, ex.getMessage());
 
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
+            HttpStatus status = resolveStatus(ex.getMessage());
+            return ResponseEntity.status(status)
                     .body(ApiResponse.error(ex.getMessage()));
         }
     }
 
     // ═══════════════════════════════════════════════════════════
-    // STEP 3 — GET PRODUCT REQUEST (SECURED)
+    // STEP 4 — USER: Get ProductRequest (after admin confirms)
     // ═══════════════════════════════════════════════════════════
 
     @GetMapping("/{productRequestId}")
@@ -112,7 +134,6 @@ public class ProductRequestController {
         }
 
         UUID userId = principal.getUserId();
-
         log.info("GET /product-requests/{} — user [{}]", productRequestId, userId);
 
         try {
@@ -121,26 +142,27 @@ public class ProductRequestController {
 
             return ResponseEntity.ok(ApiResponse.success(
                     "Product request retrieved",
-                    response
-            ));
+                    response));
 
         } catch (RuntimeException ex) {
             log.warn("Fetch failed | productRequestId={} | user={}: {}",
                     productRequestId, userId, ex.getMessage());
 
-            HttpStatus status;
-            if (ex.getMessage().startsWith("Unauthorized")) {
-                status = HttpStatus.FORBIDDEN;
-            } else if (ex.getMessage().startsWith("Product request not found")) {
-                status = HttpStatus.NOT_FOUND;
-            } else {
-                status = HttpStatus.BAD_REQUEST;
-            }
-
-            return ResponseEntity
-                    .status(status)
+            HttpStatus status = resolveStatus(ex.getMessage());
+            return ResponseEntity.status(status)
                     .body(ApiResponse.error(ex.getMessage()));
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // PRIVATE — Resolve HTTP status from exception message
+    // ═══════════════════════════════════════════════════════════
+
+    private HttpStatus resolveStatus(String message) {
+        if (message == null)                          return HttpStatus.INTERNAL_SERVER_ERROR;
+        if (message.startsWith("Unauthorized"))       return HttpStatus.FORBIDDEN;
+        if (message.contains("not found"))            return HttpStatus.NOT_FOUND;
+        return HttpStatus.BAD_REQUEST;
     }
 
     // ═══════════════════════════════════════════════════════════

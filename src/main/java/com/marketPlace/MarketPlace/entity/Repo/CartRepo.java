@@ -4,6 +4,7 @@ import com.marketPlace.MarketPlace.entity.Cart;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -20,6 +21,10 @@ public interface CartRepo extends JpaRepository<Cart, UUID> {
     // --- Specific cart item lookup ---
     Optional<Cart> findByUserIdAndProductId(UUID userId, UUID productId);
     boolean existsByUserIdAndProductId(UUID userId, UUID productId);
+
+    @Modifying
+    @Query("DELETE FROM Cart c WHERE c.product.id = :productId")
+    int deleteByProductId(@Param("productId") UUID productId);
 
     // --- Clear entire cart ---
     @Modifying
