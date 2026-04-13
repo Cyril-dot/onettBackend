@@ -13,6 +13,4 @@ import java.util.UUID;
 public interface PaymentRepo extends JpaRepository<Payment, UUID> {
     Optional<Payment> findByOrderId(UUID orderId);
     List<Payment> findByPaymentStatus(PaymentStatus status);
-    Optional<Payment> findByPaystackReference(String reference);
-    boolean existsByPaystackReference(String reference);
 }
