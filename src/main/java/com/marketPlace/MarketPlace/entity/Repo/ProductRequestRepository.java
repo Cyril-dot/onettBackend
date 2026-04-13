@@ -34,9 +34,6 @@ public interface ProductRequestRepository extends JpaRepository<ProductRequest, 
     // Check if a user has already requested a product
     boolean existsByUserAndUserProduct(User user, UserProduct userProduct);
 
-    // Find by Paystack reference (for payment verification webhook)
-    Optional<ProductRequest> findByPaystackReference(String paystackReference);
-
     // Find by approval status (for admin)
     Page<ProductRequest> findByApprovalStatus(ApprovalStatus approvalStatus, Pageable pageable);
 
