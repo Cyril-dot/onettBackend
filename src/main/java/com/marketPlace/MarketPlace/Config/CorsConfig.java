@@ -31,6 +31,7 @@ public class CorsConfig {
                 "http://localhost:5500",
                 "http://localhost:8081",
                 "http://192.168.8.127:8081",
+                "https://magenta-medovik-ba192f.netlify.app",
                 // Lovable
                 "https://lovable.dev",
                 "https://*.lovable.dev",
