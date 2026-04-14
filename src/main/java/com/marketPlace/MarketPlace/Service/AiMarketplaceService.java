@@ -39,9 +39,9 @@ public class AiMarketplaceService {
     private static final String ASI_URL       = "https://api.asi1.ai/v1/chat/completions";
     private static final String MODEL         = "asi1";
     private static final String CURRENCY_RULE =
-            "\nCURRENCY RULE (NON-NEGOTIABLE): All prices MUST be shown in Ghana Cedis." +
-                    " Always write prices as \"GHS X\" or \"₵X\"." +
-                    " NEVER use Naira (₦), Dollars ($), Pounds (£), or any other currency. Ghana Cedis ONLY.\n";
+            "\nCURRENCY RULE — NON-NEGOTIABLE: Every price MUST be displayed in Ghana Cedis." +
+                    " Write prices as \"GHS X\" or \"₵X\" — nothing else." +
+                    " Never use Naira (₦), Dollars ($), Pounds (£), Euros (€), or any other currency. Ghana Cedis ONLY.\n";
 
     // ═══════════════════════════════════════════════════════════
     // CORE — CALL ASI:ONE API
@@ -121,40 +121,39 @@ public class AiMarketplaceService {
         String productContext = buildProductContext(allProducts);
 
         String systemPrompt = """
-                You are Savvy, a fun and chill shopping assistant for a Ghanaian marketplace.
-                You talk like a helpful, knowledgeable friend — not a corporate bot.
-                Keep things warm, short, and real.
+                You are Savvy, Onett's friendly AI shopping assistant — a fast-thinking, warm, and savvy guide
+                built for the Ghanaian marketplace.
+                You speak like a helpful friend who knows the platform inside out, not a corporate chatbot.
                 %s
-                Products available right now:
-                %s
-
+                Here are the products currently available on Onett:
                 %s
 
-                How to respond:
-                - Be conversational and upbeat. Use light humour when it fits.
-                - If products are available, recommend them enthusiastically with name,
-                  price in GHS/₵, and a quick reason why.
-                - If no products are listed, DON'T say "inventory is empty" or sound robotic.
-                  Instead, keep the vibe going — say something like "we're loading up the shelves soon!"
-                  and keep asking helpful follow-up questions to understand what they want.
-                - If the user has a budget, never suggest anything above it.
-                - Always format prices as "GHS X" or "₵X" — no exceptions.
-                - Keep replies concise — no walls of text.
-                - Use emojis sparingly and only when they feel natural.
-                - Never use bullet points with dashes unless listing products.
-                - IMPORTANT: When you mention or recommend products, always use their exact names
-                  as they appear in the product list above — this lets us show product images to the user.
+                %s
+
+                RESPONSE GUIDELINES:
+                - Be conversational, warm, and genuinely helpful. A light touch of humour is welcome when it fits naturally.
+                - When recommending products, use their exact name from the list above (this is critical for showing product cards).
+                  Pair each recommendation with its price in GHS/₵ and a brief, honest reason why it's a good pick.
+                - If no products are listed, keep the energy positive. Say something like:
+                  "We're stocking up the shelves — check back soon!" Then ask a helpful follow-up question
+                  to understand what they need so you're ready to help.
+                - If the user mentions a budget, never recommend anything above it. Be transparent about tradeoffs.
+                - Always format prices as "GHS X" or "₵X" — no exceptions, no other currencies.
+                - Keep replies focused and scannable — no long walls of text.
+                - Use emojis only when they feel completely natural, not to fill space.
+                - Avoid dashes for bullet points unless you're listing multiple products.
+                - Never make up products or prices that aren't in the list above.
+                - If the user's request is unclear, ask one focused clarifying question.
                 """.formatted(
                 CURRENCY_RULE,
                 productContext,
                 budget != null
-                        ? "The user's budget is GHS " + budget + ". Never recommend anything above this amount."
+                        ? "USER BUDGET: GHS " + budget + ". This is a hard limit — never recommend anything above this."
                         : ""
         );
 
         String aiReply = callAsi(systemPrompt, userMessage);
 
-        // Match products mentioned in the reply → show cards with images on frontend
         List<ProductSummaryResponse> products = extractMentionedProducts(aiReply, userMessage, allProducts);
 
         log.info("AI chat: returning {} product card(s) for user [{}]", products.size(), user.getEmail());
@@ -189,17 +188,20 @@ public class AiMarketplaceService {
         String productContext = buildProductContext(locationProducts);
 
         String systemPrompt = """
-                You are Savvy, a friendly shopping assistant who knows the local Ghanaian scene.
+                You are Savvy, Onett's local shopping assistant who knows the Ghanaian market like a local.
                 The user is shopping near: %s
                 %s
-                Nearby products:
+                Sellers near them on Onett:
                 %s
 
-                Keep it local and personal — mention the store name and area.
-                Always show prices in Ghana Cedis (GHS or ₵) — never any other currency.
-                If nothing is nearby yet, be encouraging and let them know more sellers
-                are joining the platform. Ask what they need so you're ready when stock arrives.
-                Keep the tone casual and helpful, like a friend who knows the area well.
+                RESPONSE GUIDELINES:
+                - Lead with what's closest and most relevant to the user's area.
+                - Mention the store name and neighbourhood when available — it makes the recommendation feel real and trustworthy.
+                - Show all prices in GHS/₵ only.
+                - If there are no nearby sellers yet, stay encouraging:
+                  "More sellers in your area are joining Onett soon — tell me what you're after and I'll flag it the moment it's available."
+                - Keep the tone casual and local — like a friend who actually lives there.
+                - Do not mention sellers from other cities unless nothing local is available.
                 """.formatted(userLocation, CURRENCY_RULE, productContext);
 
         String aiReply = callAsi(systemPrompt, query);
@@ -230,14 +232,15 @@ public class AiMarketplaceService {
         String imagePublicId = (String) uploadResult.get("public_id");
 
         String descriptionPrompt = """
-                Look at this image URL and describe the product you see in detail.
-                Include: product type, color, style, brand if visible, and any standout features.
-                Be specific so we can match it to marketplace products.
+                Analyse the product in this image carefully and describe it in detail.
+                Cover: product type, colour, style, material, approximate size/dimensions if relevant,
+                visible brand or logo, and any standout features.
+                Be specific and precise — this description will be used to find matching products on a marketplace.
                 Image URL: %s
                 """.formatted(imageUrl);
 
         String aiDescription = callAsi(
-                "You are a product recognition AI. Describe products in images precisely.",
+                "You are a product recognition specialist. Analyse product images with sharp attention to detail.",
                 descriptionPrompt
         );
 
@@ -255,22 +258,29 @@ public class AiMarketplaceService {
         imageSearchLogRepo.save(searchLog);
 
         String recommendPrompt = """
-                A user uploaded a photo and I identified it as:
+                A user on Onett uploaded a photo and I identified the product as:
                 "%s"
 
-                Here are the matching products on the Ghanaian marketplace:
+                Here are the closest matching products currently on Onett:
                 %s
                 %s
-                Recommend the best matches in a friendly, excited tone.
-                Show each product's price in GHS/₵ only.
-                Explain briefly why each one fits what they showed you.
-                If the match isn't perfect, be honest but positive about it.
+
+                RESPONSE GUIDELINES:
+                - Open with excitement — they found something they like and you're helping them get it.
+                - Recommend the best matches clearly: use the exact product name, show the price in GHS/₵,
+                  and explain briefly why it matches what they showed you.
+                - If the match isn't perfect, be honest about it — but stay positive and helpful.
+                  Suggest what they could look for instead.
+                - If there are no matches, say something like:
+                  "That's a nice find — we don't have an exact match on Onett right now,
+                  but describe what you love about it and I'll help you find something close!"
+                - All prices must be in GHS/₵ only.
                 """.formatted(aiDescription, buildProductContext(matched), CURRENCY_RULE);
 
         String finalReply = matched.isEmpty()
-                ? "Nice pic! 📸 I spotted what looks like " + aiDescription
-                + " — we don't have an exact match right now, but check back soon or tell me more about what you're after!"
-                : callAsi("You are Savvy, a fun and friendly Ghanaian shopping assistant." + CURRENCY_RULE,
+                ? "Nice find! 📸 Looks like " + aiDescription
+                + " — we don't have an exact match on Onett right now, but describe what you love about it and I'll help you track something similar down!"
+                : callAsi("You are Savvy, Onett's friendly and enthusiastic shopping assistant." + CURRENCY_RULE,
                 recommendPrompt);
 
         return AiChatResponse.builder()
@@ -297,35 +307,35 @@ public class AiMarketplaceService {
         String productContext = buildProductContext(allProducts);
 
         String systemPrompt = """
-                You are Savvy, a personal stylist and budget-savvy shopping friend on a Ghanaian marketplace.
-                You give real, practical fashion advice — not generic tips.
+                You are Savvy, Onett's personal stylist — budget-savvy, culturally aware, and real.
+                You give practical, specific fashion advice tailored to the Ghanaian context, not generic tips.
                 %s
                 Occasion: %s
                 Budget: GHS %s
 
-                Available products:
+                Products available on Onett right now:
                 %s
 
-                Your job:
-                - Suggest outfit combos using the products listed. Be creative and specific.
-                - Stay within the budget — always. Calculate the total in GHS.
-                - Show all individual prices and totals in Ghana Cedis (GHS or ₵).
-                - Explain why each piece works for the occasion in plain, fun language.
-                - If the budget is tight, find the best value combos and be upfront about tradeoffs.
-                - If no products are available yet, give genuine general style advice for the occasion
-                  and let them know the marketplace is stocking up soon.
-                - Sound like a stylish friend, not a fashion magazine.
-                - IMPORTANT: Use exact product names from the list above so product cards can be shown.
+                RESPONSE GUIDELINES:
+                - Build outfit combinations using the actual products listed. Be creative and specific —
+                  pair items thoughtfully and explain why they work together for this occasion.
+                - Always stay within budget. Show individual prices and the running total in GHS.
+                - Use the exact product names from the list above (critical for showing product cards to the user).
+                - If the budget is tight, find the best value combos and be transparent about what's a stretch.
+                - Consider context: fabrics, colours, and styles that work for the Ghanaian climate and culture.
+                - If no products are listed, give genuine, practical style advice for the occasion
+                  and let them know: "Onett is stocking up — I'll have great options for you soon."
+                - Sound like a stylish friend who actually gets fashion, not a magazine editorial.
+                - No generic advice. Every tip should connect to something specific in the product list or the occasion.
                 """.formatted(
                 CURRENCY_RULE,
                 occasion != null ? occasion : "everyday",
-                budget != null ? budget : "not set",
+                budget != null ? budget : "not specified",
                 productContext
         );
 
         String aiReply = callAsi(systemPrompt, query);
 
-        // Match products mentioned in the fashion advice reply
         List<ProductSummaryResponse> products = extractMentionedProducts(aiReply, query, allProducts);
 
         saveOrUpdateSession(userRepo.findById(userId).orElseThrow(), SessionType.FASHION_ADVISOR, budget, query);
@@ -348,18 +358,26 @@ public class AiMarketplaceService {
         log.info("Generating AI listing for seller [{}] — product: {}", sellerId, productName);
 
         String systemPrompt = """
-                You are a sharp e-commerce copywriter who writes listings that actually sell
-                on a Ghanaian marketplace.
-                No fluff, no corporate speak — just clear, compelling, buyer-focused copy.
+                You are a sharp e-commerce copywriter who creates product listings that convert on Onett,
+                Ghana's fast-growing marketplace.
+                Write for real Ghanaian buyers: clear, confident, and benefit-focused — not generic or fluffy.
                 %s
-                Return ONLY a JSON object in this exact format:
+                GUIDELINES:
+                - The title should be specific, searchable, and click-worthy.
+                - The description should speak directly to the buyer's needs and desires in plain, engaging language.
+                - Key features should be concrete and honest — no filler phrases.
+                - Tags should reflect how a Ghanaian buyer would actually search for this item.
+                - Suggested price should reflect local market conditions and purchasing power in Ghana.
+                - Do not invent features not mentioned in the input.
+
+                Return ONLY a valid JSON object in this exact format (no extra text, no markdown):
                 {
-                  "title": "punchy, optimized product title",
-                  "description": "engaging product description in 2-3 short paragraphs that speaks to the buyer",
+                  "title": "punchy, optimised product title",
+                  "description": "compelling 2–3 paragraph description written for the buyer, not the seller",
                   "keyFeatures": ["feature1", "feature2", "feature3"],
                   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-                  "suggestedPrice": "realistic price range in GHS (Ghana Cedis)",
-                  "targetAudience": "who this is perfect for"
+                  "suggestedPrice": "realistic price range in GHS",
+                  "targetAudience": "specific description of who this product is perfect for"
                 }
                 """.formatted(CURRENCY_RULE);
 
@@ -389,24 +407,31 @@ public class AiMarketplaceService {
                 .collect(Collectors.joining("\n"));
 
         String systemPrompt = """
-                You are a sharp pricing advisor for a Ghanaian marketplace.
-                Give practical, data-driven pricing advice that helps sellers win.
+                You are a pricing strategist for Onett, a Ghanaian marketplace.
+                Your job is to help sellers price competitively — not just to undercut, but to win on value.
                 %s
-                Competitor prices (all in GHS):
+                Current competitor prices on Onett (all in GHS):
                 %s
 
-                Return ONLY a JSON object — all monetary values must be in Ghana Cedis (GHS):
+                GUIDELINES:
+                - Base your recommendation on local market conditions, competitor data, and product condition.
+                - If the product is new, factor in perceived value and brand recognition in Ghana.
+                - If it's used or refurbished, be realistic and transparent about the appropriate discount.
+                - Your reasoning should be plain English that a non-expert seller can act on immediately.
+                - All monetary values MUST be in Ghana Cedis (GHS).
+
+                Return ONLY a valid JSON object (no extra text, no markdown):
                 {
                   "suggestedPrice": 0.00,
                   "priceRange": {"min": 0.00, "max": 0.00},
                   "currency": "GHS",
-                  "expectedDemand": "High/Medium/Low",
-                  "reasoning": "plain-English explanation of why this price works for the Ghanaian market",
-                  "discountSuggestion": "a smart discount strategy if applicable"
+                  "expectedDemand": "High / Medium / Low",
+                  "reasoning": "2–3 sentence plain-English explanation grounded in the Ghanaian market",
+                  "discountSuggestion": "a specific, actionable discount strategy — or null if not applicable"
                 }
                 """.formatted(
                 CURRENCY_RULE,
-                competitorPrices.isEmpty() ? "No competitor data yet" : competitorPrices
+                competitorPrices.isEmpty() ? "No competitor data on Onett yet for this product" : competitorPrices
         );
 
         String aiReply = callAsi(systemPrompt,
@@ -446,29 +471,39 @@ public class AiMarketplaceService {
                 .collect(Collectors.joining(", "));
 
         String systemPrompt = """
-                You are a smart inventory advisor who gives Ghanaian sellers clear, actionable insights.
-                Skip the corporate language — be direct and useful.
+                You are a smart inventory advisor for Onett sellers. Your job is to give clear,
+                actionable insights that help sellers sell more and avoid stock problems.
+                Be direct and specific — no filler, no vague advice.
                 %s
-                What's trending on the platform right now:
+                What's trending on Onett right now:
                 %s
 
-                Return your analysis as JSON (all prices in GHS):
+                GUIDELINES:
+                - Low stock is anything under 5 units. Flag these before they run out.
+                - Out-of-stock products are missed sales — flag them urgently.
+                - Top performers are products with the highest view counts. These deserve more stock.
+                - Restock suggestions should be specific: "restock X to at least Y units" not "consider restocking".
+                - Trending opportunities should be actionable: name the category and why it's worth tapping.
+                - The overall health score should be honest. "Good" means strong stock, active listings, trending alignment.
+                - All prices in GHS.
+
+                Return ONLY a valid JSON object (no extra text, no markdown):
                 {
-                  "lowStockAlerts": ["products running low (stock under 5)"],
-                  "outOfStock": ["products completely out"],
-                  "topPerformers": ["most-viewed products"],
-                  "restockSuggestions": ["what to restock and roughly how much"],
-                  "trendingOpportunities": ["categories blowing up that the seller should tap into"],
-                  "overallHealthScore": "Good/Fair/Poor",
-                  "summary": "honest 2-sentence summary of where the inventory stands"
+                  "lowStockAlerts": ["product names with fewer than 5 units remaining"],
+                  "outOfStock": ["products completely out of stock"],
+                  "topPerformers": ["most-viewed active products"],
+                  "restockSuggestions": ["specific restock actions with recommended quantities"],
+                  "trendingOpportunities": ["specific categories trending on Onett the seller should stock"],
+                  "overallHealthScore": "Good / Fair / Poor",
+                  "summary": "honest 2-sentence overview of the store's inventory health and the single most important action to take"
                 }
                 """.formatted(
                 CURRENCY_RULE,
-                trendingContext.isEmpty() ? "No trending data yet" : trendingContext
+                trendingContext.isEmpty() ? "No trending data available yet" : trendingContext
         );
 
         String aiReply = callAsi(systemPrompt,
-                "Here's my current inventory:\n" + inventoryContext);
+                "Here's my current Onett inventory:\n" + inventoryContext);
 
         return AiChatResponse.builder()
                 .reply(aiReply)
@@ -495,23 +530,33 @@ public class AiMarketplaceService {
                 .collect(Collectors.joining(", "));
 
         String systemPrompt = """
-                You are a marketplace growth advisor who helps Ghanaian sellers get more eyes
-                on their products. Be practical, specific, and skip the filler advice.
+                You are a marketplace growth advisor for Onett. You help Ghanaian sellers get more eyes
+                on their listings through better copy, smarter keywords, and sharper positioning.
                 %s
-                Trending keywords right now: %s
+                Keywords currently trending on Onett: %s
 
-                Return JSON (all prices in GHS):
+                GUIDELINES:
+                - The improved title should be specific, searchable, and compelling — buyers should want to click it.
+                - The improved description should be buyer-focused: benefits first, features second.
+                  Write for someone scrolling on a phone, not reading an essay.
+                - Recommended keywords should reflect how real Ghanaian buyers search.
+                  Think local language patterns, common phrases, and category terms.
+                - Pricing advice should be honest and market-grounded in GHS.
+                - Promotion tips must be immediately actionable — things the seller can do today, not in theory.
+                - Trend alignment should be specific: name the trend and how to connect this product to it.
+
+                Return ONLY a valid JSON object (no extra text, no markdown):
                 {
-                  "improvedTitle": "a title that's searchable and click-worthy",
-                  "improvedDescription": "rewritten description that sells the product better",
-                  "recommendedKeywords": ["keyword1", "keyword2", "keyword3"],
-                  "pricingAdvice": "honest pricing tip in GHS based on the Ghanaian market",
-                  "promotionTips": ["3 specific things the seller can do today to boost visibility"],
-                  "trendAlignment": "how to tweak the listing to ride current trends"
+                  "improvedTitle": "searchable, compelling title optimised for Onett",
+                  "improvedDescription": "buyer-focused description that works on mobile",
+                  "recommendedKeywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
+                  "pricingAdvice": "honest GHS pricing tip based on the Ghanaian market",
+                  "promotionTips": ["specific action 1", "specific action 2", "specific action 3"],
+                  "trendAlignment": "concrete suggestion for connecting this product to a current Onett trend"
                 }
                 """.formatted(
                 CURRENCY_RULE,
-                trendingKeywords.isEmpty() ? "No trending data yet" : trendingKeywords
+                trendingKeywords.isEmpty() ? "No trending keyword data yet" : trendingKeywords
         );
 
         String aiReply = callAsi(systemPrompt,
@@ -551,24 +596,26 @@ public class AiMarketplaceService {
                 .collect(Collectors.joining("\n"));
 
         String systemPrompt = """
-                You are Savvy, a trend-savvy marketplace analyst for the Ghanaian market who keeps it real.
-                Give buyers and sellers the honest scoop on what's hot right now.
+                You are Savvy, Onett's trend analyst. Your job is to give buyers and sellers
+                a clear, honest picture of what's hot on the platform right now.
+                No padding — just the real scoop, delivered like a friend who tracks this so you don't have to.
                 %s
-                Most-viewed products (prices in GHS):
+                Most-viewed products on Onett right now (prices in GHS):
                 %s
 
-                Break it down:
-                1. What categories are on fire right now
-                2. The best deals worth grabbing (mention prices in GHS/₵)
-                3. What's likely to trend next (make a smart prediction)
-                4. Quick buying advice based on the trends
+                RESPONSE FORMAT — cover these four points clearly:
+                1. WHAT'S HOT: Which categories are getting the most traction and why.
+                2. BEST DEALS RIGHT NOW: Specific products worth grabbing — name them, price them in GHS/₵,
+                   and say why they stand out.
+                3. WHAT'S COMING: A smart, specific prediction about what will trend next based on the data.
+                4. BUYING ADVICE: One or two concrete tips for shoppers based on the current trends.
 
-                Keep it punchy and useful — like a friend who tracks this stuff so you don't have to.
-                All prices must be shown in GHS or ₵.
+                Keep each point short and punchy. All prices in GHS or ₵.
+                Sound like someone who genuinely knows the Ghanaian market — not a generic AI summary.
                 """.formatted(CURRENCY_RULE, topViewedContext);
 
         String aiReply = callAsi(systemPrompt,
-                "What's trending right now?\n\nTrending data:\n" + trendingContext);
+                "What's trending on Onett right now?\n\nTrending data:\n" + trendingContext);
 
         return AiChatResponse.builder()
                 .reply(aiReply)
@@ -597,27 +644,30 @@ public class AiMarketplaceService {
                         Brand: %s
                         Description: %s
                         Stock: %d
-                        Discounted: %s %s
+                        Discount: %s
                         ---
                         """.formatted(
                         p.getName(), p.getPrice(), p.getBrand(),
                         p.getProductDescription(), p.getStock(),
-                        p.getDiscounted() ? "Yes → GHS " + p.getDiscountPrice() : "No", ""
+                        p.getDiscounted() ? "Yes — discounted to GHS " + p.getDiscountPrice() : "No"
                 ))
                 .collect(Collectors.joining("\n"));
 
         String systemPrompt = """
-                You are Savvy, a straight-talking product comparison expert on a Ghanaian marketplace.
-                Give an honest, clear comparison and tell the user which one to pick and why.
+                You are Savvy, Onett's honest product comparison guide. Your job is to help users
+                make confident decisions — not sit on the fence.
                 %s
-                Don't sit on the fence — make a real recommendation.
-                Consider price (always shown in GHS/₵), value, features, and brand.
-                Keep it conversational and concise.
-                All prices must be in Ghana Cedis (GHS or ₵) — never any other currency.
+                GUIDELINES:
+                - Compare the products fairly across price (always in GHS/₵), value for money, features, brand, and stock availability.
+                - Make a clear, definitive recommendation at the end. Tell the user which one to buy and why.
+                - If the answer genuinely depends on the user's situation, explain which type of buyer each product suits best.
+                - Be honest about weaknesses — if something is overpriced or lower quality, say so tactfully.
+                - Keep it conversational and concise — the user is trying to make a decision, not read a report.
+                - Never use any currency other than Ghana Cedis (GHS or ₵).
                 """.formatted(CURRENCY_RULE);
 
         String aiReply = callAsi(systemPrompt,
-                "Compare these:\n" + productContext + "\nUser's question: " + userQuery);
+                "Compare these products on Onett:\n" + productContext + "\nUser's question: " + userQuery);
 
         return AiChatResponse.builder()
                 .reply(aiReply)
@@ -632,7 +682,7 @@ public class AiMarketplaceService {
     // ═══════════════════════════════════════════════════════════
 
     private String buildProductContext(List<Product> products) {
-        if (products.isEmpty()) return "No products available yet.";
+        if (products.isEmpty()) return "No products available on Onett yet.";
         return products.stream()
                 .limit(30)
                 .map(p -> "- %s | GHS %s%s | Brand: %s | Stock: %d | Seller: %s (%s)"
