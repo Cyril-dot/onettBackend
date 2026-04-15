@@ -1,4 +1,3 @@
-// SecurityConfig.java
 package com.marketPlace.MarketPlace.Config.Security;
 
 import com.marketPlace.MarketPlace.Config.Security.RateLimitingConfigs.RateLimitFilter;
@@ -36,14 +35,32 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+
         http
+                // =========================
+                // CORS (IMPORTANT FIX)
+                // =========================
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
+
+                // =========================
+                // CSRF DISABLE (REST API)
+                // =========================
                 .csrf(csrf -> csrf.disable())
+
+                // =========================
+                // STATELESS SESSION
+                // =========================
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
+                // =========================
+                // AUTHORIZATION RULES
+                // =========================
                 .authorizeHttpRequests(auth -> auth
+
+                        // 🔥 CRITICAL FIX: Allow preflight requests
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                         // ── AUTH ────────────────────────────────────────────────
                         .requestMatchers(
@@ -53,18 +70,18 @@ public class SecurityConfig {
                                 "/api/v1/sellers/login"
                         ).permitAll()
 
-                        // ── WEBHOOKS (no JWT) ───────────────────────────────────
+                        // ── WEBHOOKS ───────────────────────────────────────────
                         .requestMatchers(
                                 "/api/v1/payments/orders/webhook",
                                 "/api/v1/payments/product-listing/webhook"
                         ).permitAll()
 
-                        // ── PUBLIC GET ROUTES ───────────────────────────────────
+                        // ── PUBLIC PRODUCTS ────────────────────────────────────
                         .requestMatchers(HttpMethod.GET,
                                 "/api/v1/products/**"
                         ).permitAll()
 
-                        // ── INFRASTRUCTURE ──────────────────────────────────────
+                        // ── INFRASTRUCTURE ─────────────────────────────────────
                         .requestMatchers(
                                 "/api/v1/auth/**",
                                 "/error/**",
@@ -78,7 +95,7 @@ public class SecurityConfig {
                                 "/test/**"
                         ).permitAll()
 
-                        // ── USER ROUTES ─────────────────────────────────────────
+                        // ── USER ROUTES ────────────────────────────────────────
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/payments/orders/*/submit",
                                 "/api/v1/payments/product-listing/submit",
@@ -89,16 +106,19 @@ public class SecurityConfig {
                                 "/api/v1/product-requests/*"
                         ).hasRole("USER")
 
-                        // ── SELLER (ADMIN) ROUTES ───────────────────────────────
+                        // ── SELLER ROUTES ──────────────────────────────────────
                         .requestMatchers(
                                 "/api/v1/payments/orders/admin/**",
                                 "/api/v1/payments/product-listing/admin/**"
                         ).hasRole("SELLER")
 
-                        // ── EVERYTHING ELSE ─────────────────────────────────────
+                        // ── EVERYTHING ELSE ────────────────────────────────────
                         .anyRequest().authenticated()
                 )
 
+                // =========================
+                // ERROR HANDLING
+                // =========================
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint((request, response, authException) -> {
                             log.warn("🚫 Unauthorized: {} {}", request.getMethod(), request.getRequestURI());
@@ -111,20 +131,32 @@ public class SecurityConfig {
                         })
                 )
 
+                // =========================
+                // FILTERS
+                // =========================
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
+    // =========================
+    // DISABLE DOUBLE REGISTRATION OF JWT FILTER
+    // =========================
     @Bean
     public FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration(
             JwtAuthenticationFilter filter) {
-        FilterRegistrationBean<JwtAuthenticationFilter> reg = new FilterRegistrationBean<>(filter);
+
+        FilterRegistrationBean<JwtAuthenticationFilter> reg =
+                new FilterRegistrationBean<>(filter);
+
         reg.setEnabled(false);
         return reg;
     }
 
+    // =========================
+    // PASSWORD ENCODER
+    // =========================
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
