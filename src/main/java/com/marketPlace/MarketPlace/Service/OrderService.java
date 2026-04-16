@@ -24,13 +24,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OrderService {
 
-    private final OrderRepo             orderRepo;
-    private final OrderItemRepo         orderItemRepo;
-    private final UserRepo              userRepo;
-    private final ProductRepo           productRepo;
-    private final CartRepo              cartRepo;
-    private final PaymentRepo           paymentRepo;
-    private final NotificationService   notificationService;
+    private final OrderRepo           orderRepo;
+    private final OrderItemRepo       orderItemRepo;
+    private final UserRepo            userRepo;
+    private final ProductRepo         productRepo;
+    private final CartRepo            cartRepo;
+    private final PaymentRepo         paymentRepo;
+    private final NotificationService notificationService;
 
     // ═══════════════════════════════════════════════════════════
     // USER — INITIATE ORDER
@@ -91,7 +91,7 @@ public class OrderService {
         for (Cart cart : cartItems) {
             Product product = cart.getProduct();
 
-            // null-safe Boolean check — prevents NPE and ensures discount is always applied correctly
+            // null-safe Boolean check — prevents NPE on discounted flag
             boolean isDiscounted = Boolean.TRUE.equals(product.getDiscounted());
             BigDecimal discountPrice = product.getDiscountPrice();
             BigDecimal unitPrice = (isDiscounted && discountPrice != null)
@@ -123,7 +123,6 @@ public class OrderService {
         log.info("Order [{}] initiated for user [{}] — total: {} — chargeAmount: {} — preOrder: {}",
                 savedOrder.getId(), user.getEmail(), total, chargeAmount, isPreOrder);
 
-        // Notify admin that a new order has been placed
         notificationService.notifyAdminSellerOrderPlaced(savedOrder);
 
         return OrderInitResponse.builder()
@@ -152,6 +151,13 @@ public class OrderService {
 
         for (OrderItem item : order.getOrderItems()) {
             Product product = item.getProduct();
+
+            // FIXED: null guard — product may have been deleted after order was placed
+            if (product == null) {
+                log.warn("Skipping stock deduction — product no longer exists for item [{}]", item.getId());
+                continue;
+            }
+
             int newStock = product.getStock() - item.getQuantity();
             if (newStock < 0) {
                 log.error("Stock went negative for product [{}] after payment — investigate immediately", product.getId());
@@ -204,6 +210,8 @@ public class OrderService {
         if (order.getOrderStatus() == OrderStatus.SHIPPED) {
             throw new ApiException("Cannot cancel a shipped order — contact support");
         }
+
+        // If never paid, cancel immediately without stock restore
         if (order.getOrderStatus() == OrderStatus.AWAITING_PAYMENT
                 || order.getOrderStatus() == OrderStatus.PAYMENT_FAILED) {
             orderRepo.updateOrderStatus(orderId, OrderStatus.CANCELLED, LocalDateTime.now());
@@ -214,11 +222,19 @@ public class OrderService {
 
         long minutesSincePlaced = ChronoUnit.MINUTES.between(order.getCreatedAt(), LocalDateTime.now());
         if (minutesSincePlaced > 120) {
-            throw new ApiException("Cancellation window has passed — orders can only be cancelled within 2 hours of placement");
+            throw new ApiException(
+                    "Cancellation window has passed — orders can only be cancelled within 2 hours of placement");
         }
 
         for (OrderItem item : order.getOrderItems()) {
             Product product = item.getProduct();
+
+            // FIXED: null guard — product may have been deleted after order was placed
+            if (product == null) {
+                log.warn("Skipping stock restore — product no longer exists for item [{}]", item.getId());
+                continue;
+            }
+
             product.setStock(product.getStock() + item.getQuantity());
             productRepo.save(product);
             log.info("Stock restored for product [{}]: +{}", product.getName(), item.getQuantity());
@@ -240,7 +256,8 @@ public class OrderService {
     public List<OrderResponse> getUserOrders(UUID userId) {
         log.info("Fetching orders for user [{}]", userId);
         return orderRepo.findByUserIdOrderByCreatedAtDesc(userId)
-                .stream().map(this::mapToOrderResponse)
+                .stream()
+                .map(this::mapToOrderResponse)
                 .collect(Collectors.toList());
     }
 
@@ -254,7 +271,8 @@ public class OrderService {
     public List<OrderResponse> getUserOrdersByStatus(UUID userId, OrderStatus status) {
         log.info("Fetching [{}] orders for user [{}]", status, userId);
         return orderRepo.findByUserIdAndOrderStatus(userId, status)
-                .stream().map(this::mapToOrderResponse)
+                .stream()
+                .map(this::mapToOrderResponse)
                 .collect(Collectors.toList());
     }
 
@@ -295,10 +313,19 @@ public class OrderService {
             throw new ApiException("Order is already cancelled");
         }
 
+        // Only restore stock if payment was already made (i.e. stock was already deducted)
         if (order.getOrderStatus() != OrderStatus.AWAITING_PAYMENT
                 && order.getOrderStatus() != OrderStatus.PAYMENT_FAILED) {
+
             for (OrderItem item : order.getOrderItems()) {
                 Product product = item.getProduct();
+
+                // FIXED: null guard — product may have been deleted after order was placed
+                if (product == null) {
+                    log.warn("[ADMIN] Skipping stock restore — product no longer exists for item [{}]", item.getId());
+                    continue;
+                }
+
                 product.setStock(product.getStock() + item.getQuantity());
                 productRepo.save(product);
                 log.info("[ADMIN] Stock restored for product [{}]: +{}", product.getName(), item.getQuantity());
@@ -320,7 +347,8 @@ public class OrderService {
 
     public List<OrderResponse> getAllOrders() {
         log.info("[ADMIN] Fetching all orders");
-        return orderRepo.findAll().stream()
+        return orderRepo.findAll()
+                .stream()
                 .map(this::mapToOrderResponse)
                 .collect(Collectors.toList());
     }
@@ -328,7 +356,8 @@ public class OrderService {
     public List<OrderResponse> getOrdersByStatus(OrderStatus status) {
         log.info("[ADMIN] Fetching orders by status [{}]", status);
         return orderRepo.findByOrderStatus(status)
-                .stream().map(this::mapToOrderResponse)
+                .stream()
+                .map(this::mapToOrderResponse)
                 .collect(Collectors.toList());
     }
 
@@ -349,8 +378,15 @@ public class OrderService {
     public List<OrderResponse> getOrdersByDateRange(LocalDateTime from, LocalDateTime to) {
         log.info("[ADMIN] Fetching orders from {} to {}", from.toLocalDate(), to.toLocalDate());
         return orderRepo.findOrdersByDateRange(from, to)
-                .stream().map(this::mapToOrderResponse)
+                .stream()
+                .map(this::mapToOrderResponse)
                 .collect(Collectors.toList());
+    }
+
+    public OrderResponse getOrderById(UUID orderId) {
+        Order order = findOrderById(orderId);
+        log.info("[ADMIN] Fetching order details [{}]", orderId);
+        return mapToOrderResponse(order);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -378,17 +414,17 @@ public class OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("totalOrders",       all.size());
-        summary.put("awaitingPayment",   countByStatus(all, OrderStatus.AWAITING_PAYMENT));
-        summary.put("paymentFailed",     countByStatus(all, OrderStatus.PAYMENT_FAILED));
-        summary.put("depositPaid",       countByStatus(all, OrderStatus.DEPOSIT_PAID));
-        summary.put("pending",           countByStatus(all, OrderStatus.PENDING));
-        summary.put("confirmed",         countByStatus(all, OrderStatus.CONFIRMED));
-        summary.put("shipped",           countByStatus(all, OrderStatus.SHIPPED));
-        summary.put("delivered",         countByStatus(all, OrderStatus.DELIVERED));
-        summary.put("cancelled",         countByStatus(all, OrderStatus.CANCELLED));
-        summary.put("totalRevenue",      totalRevenue);
-        summary.put("revenueThisWeek",   weekRevenue);
+        summary.put("totalOrders",     all.size());
+        summary.put("awaitingPayment", countByStatus(all, OrderStatus.AWAITING_PAYMENT));
+        summary.put("paymentFailed",   countByStatus(all, OrderStatus.PAYMENT_FAILED));
+        summary.put("depositPaid",     countByStatus(all, OrderStatus.DEPOSIT_PAID));
+        summary.put("pending",         countByStatus(all, OrderStatus.PENDING));
+        summary.put("confirmed",       countByStatus(all, OrderStatus.CONFIRMED));
+        summary.put("shipped",         countByStatus(all, OrderStatus.SHIPPED));
+        summary.put("delivered",       countByStatus(all, OrderStatus.DELIVERED));
+        summary.put("cancelled",       countByStatus(all, OrderStatus.CANCELLED));
+        summary.put("totalRevenue",    totalRevenue);
+        summary.put("revenueThisWeek", weekRevenue);
 
         log.info("[ADMIN] Order summary generated: {} total orders", all.size());
         return summary;
@@ -411,7 +447,16 @@ public class OrderService {
     public List<OrderResponse> getSellerOrders(UUID sellerId) {
         log.info("Fetching orders for seller [{}]", sellerId);
         return orderRepo.findOrdersBySellerId(sellerId)
-                .stream().map(this::mapToOrderResponse)
+                .stream()
+                .map(this::mapToOrderResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<OrderResponse> getSellerOrdersByStatus(UUID sellerId, OrderStatus status) {
+        log.info("Fetching [{}] orders for seller [{}]", status, sellerId);
+        return orderRepo.findOrdersBySellerIdAndStatus(sellerId, status)
+                .stream()
+                .map(this::mapToOrderResponse)
                 .collect(Collectors.toList());
     }
 
@@ -459,19 +504,6 @@ public class OrderService {
         return summary;
     }
 
-    public List<OrderResponse> getSellerOrdersByStatus(UUID sellerId, OrderStatus status) {
-        log.info("Fetching [{}] orders for seller [{}]", status, sellerId);
-        return orderRepo.findOrdersBySellerIdAndStatus(sellerId, status)
-                .stream().map(this::mapToOrderResponse)
-                .collect(Collectors.toList());
-    }
-
-    public OrderResponse getOrderById(UUID orderId) {
-        Order order = findOrderById(orderId);
-        log.info("[ADMIN] Fetching order details [{}]", orderId);
-        return mapToOrderResponse(order);
-    }
-
     // ═══════════════════════════════════════════════════════════
     // PRIVATE HELPERS
     // ═══════════════════════════════════════════════════════════
@@ -485,7 +517,9 @@ public class OrderService {
     }
 
     private long countByStatus(List<Order> orders, OrderStatus status) {
-        return orders.stream().filter(o -> o.getOrderStatus() == status).count();
+        return orders.stream()
+                .filter(o -> o.getOrderStatus() == status)
+                .count();
     }
 
     private boolean canUserCancelOrder(Order order) {
@@ -506,17 +540,35 @@ public class OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /**
+     * FIXED: Full null-safety on item.getProduct() and product.getImages().
+     * Products can be deleted after an order is placed — this must never crash the response mapper.
+     */
     private OrderItemResponse mapToOrderItemResponse(OrderItem item) {
-        String primaryImage = item.getProduct().getImages().stream()
-                .filter(img -> img.getDisplayOrder() == 0)
-                .findFirst()
-                .map(ProductImage::getImageUrl)
-                .orElse(null);
+        Product product = item.getProduct();
+
+        UUID   productId    = null;
+        String productName  = "Deleted Product";
+        String primaryImage = null;
+
+        if (product != null) {
+            productId  = product.getId();
+            productName = product.getName();
+
+            List<ProductImage> images = product.getImages();
+            if (images != null) {
+                primaryImage = images.stream()
+                        .filter(img -> img.getDisplayOrder() == 0)
+                        .findFirst()
+                        .map(ProductImage::getImageUrl)
+                        .orElse(null);
+            }
+        }
 
         return OrderItemResponse.builder()
                 .id(item.getId())
-                .productId(item.getProduct().getId())
-                .productName(item.getProduct().getName())
+                .productId(productId)
+                .productName(productName)
                 .primaryImageUrl(primaryImage)
                 .quantity(item.getQuantity())
                 .unitPrice(item.getUnitPrice())
@@ -526,8 +578,6 @@ public class OrderService {
     }
 
     private OrderResponse mapToOrderResponse(Order order) {
-        // FIX: getPaystackReference() does not exist — this is a MoMo screenshot-based payment system.
-        // Using getScreenshotUrl() as the payment reference instead.
         String paymentReference = paymentRepo.findByOrderId(order.getId())
                 .map(Payment::getScreenshotUrl)
                 .orElse(null);
