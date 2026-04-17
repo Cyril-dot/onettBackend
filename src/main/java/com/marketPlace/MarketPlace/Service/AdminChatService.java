@@ -2,6 +2,7 @@ package com.marketPlace.MarketPlace.Service;
 
 import com.marketPlace.MarketPlace.dtos.*;
 import com.marketPlace.MarketPlace.entity.*;
+import com.marketPlace.MarketPlace.entity.Enums.ChatType;
 import com.marketPlace.MarketPlace.entity.Enums.SenderType;
 import com.marketPlace.MarketPlace.entity.Repo.*;
 import com.marketPlace.MarketPlace.exception.ApiException;
@@ -16,16 +17,6 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * AdminChatService
- *
- * Provides the seller/admin dashboard with:
- *  - Full inbox listing
- *  - Chat history for any conversation belonging to this seller
- *  - Sending replies as SELLER
- *  - Unread counts and mark-as-read
- *  - Conversation filtering (all / unread-only / by chat type)
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -35,17 +26,18 @@ public class AdminChatService {
     private final MessageRepo           messageRepo;
     private final ProductImageRepo      productImageRepo;
     private final SellerRepo            sellerRepo;
+    private final OrderRepo             orderRepo;
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService   notificationService;
 
     // ═══════════════════════════════════════════════════════════
-    // GET SELLER INBOX  (rich card view — same as ChatService)
+    // GET SELLER INBOX
     // ═══════════════════════════════════════════════════════════
 
     public List<SellerInboxResponse> getInbox(UUID sellerId) {
         log.info("[Admin] Loading inbox for seller [{}]", sellerId);
 
-        return conversationsRepo.findBySellerIdOrderByCreatedAtDesc(sellerId)
+        return conversationsRepo.findBySeller_IdOrderByCreatedAtDesc(sellerId)
                 .stream()
                 .map(c -> {
                     Message lastMessage = messageRepo.findLatestMessage(c.getId());
@@ -56,23 +48,23 @@ public class AdminChatService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // GET SELLER CONVERSATIONS (list view)
+    // GET SELLER CONVERSATIONS
     // ═══════════════════════════════════════════════════════════
 
     public List<ConversationResponse> getConversations(UUID sellerId, boolean unreadOnly) {
         log.info("[Admin] Fetching conversations for seller [{}] — unreadOnly={}", sellerId, unreadOnly);
 
-        List<Conversations> convs = unreadOnly
+        List<Conversations> conversations = unreadOnly
                 ? conversationsRepo.findSellerConversationsWithUnreadMessages(sellerId)
-                : conversationsRepo.findBySellerIdOrderByCreatedAtDesc(sellerId);
+                : conversationsRepo.findBySeller_IdOrderByCreatedAtDesc(sellerId);
 
-        return convs.stream()
+        return conversations.stream()
                 .map(this::mapToConversationResponse)
                 .collect(Collectors.toList());
     }
 
     // ═══════════════════════════════════════════════════════════
-    // GET CHAT HISTORY  (seller opens a specific conversation)
+    // GET CHAT HISTORY
     // ═══════════════════════════════════════════════════════════
 
     @Transactional
@@ -85,7 +77,6 @@ public class AdminChatService {
             throw new ApiException("Unauthorized: this conversation does not belong to your store");
         }
 
-        // Mark all USER messages as read when seller opens the conversation
         messageRepo.markAsReadBySenderType(conversationId, SenderType.USER);
         log.info("[Admin] Seller [{}] opened conversation [{}] — user messages marked as read",
                 sellerId, conversationId);
@@ -141,7 +132,6 @@ public class AdminChatService {
         Message saved = messageRepo.save(message);
         MessageResponse response = mapToMessageResponse(saved);
 
-        // ── Push to buyer ────────────────────────────────────────────
         messagingTemplate.convertAndSend(
                 "/topic/user/" + conversation.getUser().getId()
                         + "/conversation/" + conversationId,
@@ -152,7 +142,6 @@ public class AdminChatService {
                 buildInboxUpdate(conversation, saved)
         );
 
-        // ── Notify buyer via FCM + in-app ────────────────────────────
         notificationService.notifyNewChatMessage(
                 conversation.getUser(),
                 seller.getStoreName(),
@@ -163,6 +152,114 @@ public class AdminChatService {
         log.info("[Admin] Seller [{}] replied in conversation [{}]",
                 seller.getStoreName(), conversationId);
         return response;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SELLER STARTS ORDER CONVERSATION
+    // ═══════════════════════════════════════════════════════════
+
+    @Transactional
+    public ConversationResponse startOrderConversation(UUID sellerId, UUID orderId) {
+        Seller seller = sellerRepo.findById(sellerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Seller not found: " + sellerId));
+
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
+
+        List<OrderItem> sellerItems = order.getOrderItems().stream()
+                .filter(item -> item.getProduct() != null
+                        && item.getProduct().getSeller() != null
+                        && item.getProduct().getSeller().getId().equals(sellerId))
+                .collect(Collectors.toList());
+
+        if (sellerItems.isEmpty()) {
+            throw new ApiException(
+                    "Unauthorized: this order contains no products from your store");
+        }
+
+        Optional<Conversations> existing =
+                conversationsRepo.findByOrder_IdAndSeller_Id(orderId, sellerId);
+
+        if (existing.isPresent()) {
+            log.info("[Admin] Seller [{}] re-opened existing order conversation [{}] for order [{}]",
+                    seller.getStoreName(), existing.get().getId(), orderId);
+            return mapToConversationResponse(existing.get());
+        }
+
+        Product primaryProduct = sellerItems.getFirst().getProduct();
+        User    buyer          = order.getUser();
+
+        Conversations conversation = Conversations.builder()
+                .user(buyer)
+                .seller(seller)
+                .product(primaryProduct)
+                .order(order)
+                .chatType(ChatType.ORDER_SUPPORT)
+                .build();
+
+        Conversations saved = conversationsRepo.save(conversation);
+
+        String orderIdShort = orderId.toString().substring(0, 8).toUpperCase();
+        String primaryImage = getPrimaryImageUrl(primaryProduct);
+        String itemsSummary = sellerItems.stream()
+                .map(i -> i.getProduct().getName() + " x" + i.getQuantity())
+                .collect(Collectors.joining(", "));
+
+        String orderCardContent = "ORDER_CARD::%s::%s::%s::%s::%s::%s::%s".formatted(
+                orderIdShort,
+                primaryProduct.getName(),
+                primaryImage != null ? primaryImage : "",
+                sellerItems.getFirst().getUnitPrice(),
+                order.getTotal(),
+                order.getOrderStatus().name(),
+                itemsSummary
+        );
+
+        Message orderCardMsg = Message.builder()
+                .conversations(saved)
+                .user(buyer)
+                .senderType(SenderType.SYSTEM)
+                .content(orderCardContent)
+                .isAutomated(true)
+                .build();
+        messageRepo.save(orderCardMsg);
+
+        String greeting = buildSellerGreeting(seller, buyer, order, sellerItems);
+
+        Message greetingMsg = Message.builder()
+                .conversations(saved)
+                .user(buyer)
+                .senderType(SenderType.SELLER)
+                .content(greeting)
+                .isAutomated(false)
+                .repliedAt(LocalDateTime.now())
+                .build();
+        messageRepo.save(greetingMsg);
+
+        messagingTemplate.convertAndSend(
+                "/topic/user/" + buyer.getId() + "/conversation/" + saved.getId(),
+                mapToMessageResponse(orderCardMsg)
+        );
+        messagingTemplate.convertAndSend(
+                "/topic/user/" + buyer.getId() + "/conversation/" + saved.getId(),
+                mapToMessageResponse(greetingMsg)
+        );
+        messagingTemplate.convertAndSend(
+                "/topic/user/" + buyer.getId() + "/inbox/update",
+                buildInboxUpdate(saved, greetingMsg)
+        );
+
+        notificationService.notifyNewChatMessage(
+                buyer,
+                seller.getStoreName(),
+                saved.getId(),
+                greeting
+        );
+
+        log.info("[Admin] Seller [{}] started order conversation [{}] for order [{}] with buyer [{}]",
+                seller.getStoreName(), saved.getId(), orderIdShort, buyer.getEmail());
+
+        return mapToConversationResponse(saved);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -206,14 +303,42 @@ public class AdminChatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Image not found: " + imageId));
     }
 
-    private ProductCardPayload buildProductCardPayload(Product product,
-                                                       Conversations conversation,
-                                                       User user) {
-        String primaryImage = product.getImages().stream()
+    private String getPrimaryImageUrl(Product product) {
+        if (product == null || product.getImages() == null) return null;
+        return product.getImages().stream()
                 .filter(img -> img.getDisplayOrder() == 0)
                 .findFirst()
                 .map(ProductImage::getImageUrl)
                 .orElse(null);
+    }
+
+    private String buildSellerGreeting(Seller seller,
+                                       User buyer,
+                                       Order order,
+                                       List<OrderItem> sellerItems) {
+        String orderIdShort = order.getId().toString().substring(0, 8).toUpperCase();
+        String productNames = sellerItems.stream()
+                .map(i -> i.getProduct().getName())
+                .collect(Collectors.joining(", "));
+
+        return """
+                Hi %s! 👋 This is %s reaching out about your recent order #%s.
+
+                You've ordered: %s
+
+                I wanted to get in touch to help coordinate your delivery and answer any questions you might have. Please feel free to reply here!
+                """.formatted(
+                buyer.getFullName().split(" ")[0],
+                seller.getStoreName(),
+                orderIdShort,
+                productNames
+        );
+    }
+
+    private ProductCardPayload buildProductCardPayload(Product product,
+                                                       Conversations conversation,
+                                                       User user) {
+        String primaryImage = getPrimaryImageUrl(product);
 
         return ProductCardPayload.builder()
                 .conversationId(conversation.getId())
@@ -234,11 +359,7 @@ public class AdminChatService {
 
     private InboxUpdatePayload buildInboxUpdate(Conversations conversation, Message lastMsg) {
         String primaryImage = conversation.getProduct() != null
-                ? conversation.getProduct().getImages().stream()
-                .filter(img -> img.getDisplayOrder() == 0)
-                .findFirst()
-                .map(ProductImage::getImageUrl)
-                .orElse(null)
+                ? getPrimaryImageUrl(conversation.getProduct())
                 : null;
 
         return InboxUpdatePayload.builder()
@@ -255,13 +376,7 @@ public class AdminChatService {
     private SellerInboxResponse mapToSellerInboxResponse(Conversations c,
                                                          Message lastMessage,
                                                          long unreadCount) {
-        String primaryImage = c.getProduct() != null
-                ? c.getProduct().getImages().stream()
-                .filter(img -> img.getDisplayOrder() == 0)
-                .findFirst()
-                .map(ProductImage::getImageUrl)
-                .orElse(null)
-                : null;
+        String primaryImage = c.getProduct() != null ? getPrimaryImageUrl(c.getProduct()) : null;
 
         return SellerInboxResponse.builder()
                 .conversationId(c.getId())
@@ -285,14 +400,7 @@ public class AdminChatService {
 
     private ConversationResponse mapToConversationResponse(Conversations c) {
         Message lastMessage = messageRepo.findLatestMessage(c.getId());
-
-        String primaryImage = c.getProduct() != null
-                ? c.getProduct().getImages().stream()
-                .filter(img -> img.getDisplayOrder() == 0)
-                .findFirst()
-                .map(ProductImage::getImageUrl)
-                .orElse(null)
-                : null;
+        String primaryImage = c.getProduct() != null ? getPrimaryImageUrl(c.getProduct()) : null;
 
         return ConversationResponse.builder()
                 .id(c.getId())

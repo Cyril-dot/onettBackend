@@ -13,26 +13,26 @@ import java.util.UUID;
 public interface ConversationsRepo extends JpaRepository<Conversations, UUID> {
 
     // --- User conversations ---
-    List<Conversations> findByUserIdOrderByCreatedAtDesc(UUID userId);
-    List<Conversations> findByUserIdAndChatType(UUID userId, ChatType chatType);
+    List<Conversations> findByUser_IdOrderByCreatedAtDesc(UUID userId);
+    List<Conversations> findByUser_IdAndChatType(UUID userId, ChatType chatType);
 
     // --- Seller conversations ---
-    List<Conversations> findBySellerIdOrderByCreatedAtDesc(UUID sellerId);
-    List<Conversations> findBySellerIdAndChatType(UUID sellerId, ChatType chatType);
+    List<Conversations> findBySeller_IdOrderByCreatedAtDesc(UUID sellerId);
+    List<Conversations> findBySeller_IdAndChatType(UUID sellerId, ChatType chatType);
 
-    boolean existsByOrderIdAndSellerId(UUID orderId, UUID sellerId);
+    boolean existsByOrder_IdAndSeller_Id(UUID orderId, UUID sellerId);
 
     // --- Check if conversation already exists between user and seller ---
-    Optional<Conversations> findByUserIdAndSellerId(UUID userId, UUID sellerId);
-    boolean existsByUserIdAndSellerId(UUID userId, UUID sellerId);
+    Optional<Conversations> findByUser_IdAndSeller_Id(UUID userId, UUID sellerId);
+    boolean existsByUser_IdAndSeller_Id(UUID userId, UUID sellerId);
 
     // --- Check if conversation exists for a specific product ---
-    Optional<Conversations> findByUserIdAndSellerIdAndProductId(UUID userId, UUID sellerId, UUID productId);
-    boolean existsByUserIdAndSellerIdAndProductId(UUID userId, UUID sellerId, UUID productId);
+    Optional<Conversations> findByUser_IdAndSeller_IdAndProduct_Id(UUID userId, UUID sellerId, UUID productId);
+    boolean existsByUser_IdAndSeller_IdAndProduct_Id(UUID userId, UUID sellerId, UUID productId);
 
     // --- Product-specific conversations (seller view) ---
-    List<Conversations> findByProductId(UUID productId);
-    long countByProductId(UUID productId);
+    List<Conversations> findByProduct_Id(UUID productId);
+    long countByProduct_Id(UUID productId);
 
     // --- Conversations by chat type ---
     List<Conversations> findByChatType(ChatType chatType);
@@ -66,8 +66,10 @@ public interface ConversationsRepo extends JpaRepository<Conversations, UUID> {
     List<Conversations> findUserConversationsWithUnreadMessages(UUID userId);
 
     // --- Count total conversations per seller ---
-    long countBySellerId(UUID sellerId);
+    long countBySeller_Id(UUID sellerId);
 
     // --- Count total conversations per user ---
-    long countByUserId(UUID userId);
+    long countByUser_Id(UUID userId);
+
+    Optional<Conversations> findByOrder_IdAndSeller_Id(UUID orderId, UUID sellerId);
 }

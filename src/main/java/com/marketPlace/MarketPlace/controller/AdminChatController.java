@@ -25,14 +25,15 @@ import java.util.UUID;
  *
  * Base path: /api/v1/admin/chat
  *
- * ┌──────────────────────────────────────────────────────────────────┐
- * │ GET    /inbox                        — rich inbox card list       │
- * │ GET    /conversations                — flat conversation list     │
- * │ GET    /conversations/{id}/history   — full message thread        │
- * │ POST   /conversations/{id}/reply     — send reply as seller       │
- * │ GET    /unread-count                 — total unread badge count   │
- * │ PATCH  /conversations/{id}/read      — mark conversation as read  │
- * └──────────────────────────────────────────────────────────────────┘
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ POST   /orders/{orderId}/start           — seller starts order chat     │
+ * │ GET    /inbox                            — rich inbox card list         │
+ * │ GET    /conversations                    — flat conversation list       │
+ * │ GET    /conversations/{id}/history       — full message thread          │
+ * │ POST   /conversations/{id}/reply         — send reply as seller         │
+ * │ GET    /unread-count                     — total unread badge count     │
+ * │ PATCH  /conversations/{id}/read          — mark conversation as read    │
+ * └─────────────────────────────────────────────────────────────────────────┘
  */
 @Slf4j
 @RestController
@@ -41,6 +42,44 @@ import java.util.UUID;
 public class AdminChatController {
 
     private final AdminChatService adminChatService;
+
+    // ═══════════════════════════════════════════════════════════
+    // START ORDER CONVERSATION — seller initiates chat from orders page (NEW)
+    //
+    // POST /api/v1/admin/chat/orders/{orderId}/start
+    //
+    // Idempotent: if a conversation already exists for this order + seller,
+    // it is returned instead of creating a duplicate.
+    //
+    // Response: ConversationResponse with conversationId so the frontend
+    // can immediately navigate to the chat panel.
+    // ═══════════════════════════════════════════════════════════
+
+    @PostMapping("/orders/{orderId}/start")
+    public ResponseEntity<ApiResponse<ConversationResponse>> startOrderConversation(
+            @AuthenticationPrincipal AdminPrincipal principal,
+            @PathVariable UUID orderId) {
+
+        UUID sellerId = principal.getSellerId();
+        log.info("POST /admin/chat/orders/{}/start — seller [{}]", orderId, sellerId);
+
+        try {
+            ConversationResponse conversation =
+                    adminChatService.startOrderConversation(sellerId, orderId);
+            return ResponseEntity
+                    .status(HttpStatus.CREATED)
+                    .body(ApiResponse.success("Order conversation started", conversation));
+
+        } catch (ApiException ex) {
+            HttpStatus status = ex.getMessage().startsWith("Unauthorized")
+                    ? HttpStatus.FORBIDDEN : HttpStatus.BAD_REQUEST;
+            return ResponseEntity.status(status).body(ApiResponse.error(ex.getMessage()));
+
+        } catch (ResourceNotFoundException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.error(ex.getMessage()));
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════
     // INBOX — rich card list (product image, last msg, unread count)
