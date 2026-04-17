@@ -57,7 +57,7 @@ public class ChatService {
             List<OrderItem> sellerItems = entry.getValue();
 
             boolean chatExists = conversationsRepo
-                    .existsByOrderIdAndSellerId(orderId, seller.getId());
+                    .existsByOrder_IdAndSeller_Id(orderId, seller.getId());
 
             if (chatExists) {
                 log.info("Chat already exists for order [{}] + seller [{}] — skipping",
@@ -205,7 +205,7 @@ public class ChatService {
         log.info("User [{}] starting conversation about product [{}]",
                 user.getEmail(), product.getName());
 
-        return conversationsRepo.findByUserIdAndSellerIdAndProductId(
+        return conversationsRepo.findByUser_IdAndSeller_IdAndProduct_Id(
                         userId, seller.getId(), request.getProductId())
                 .map(existing -> {
                     log.info("Existing conversation found: [{}]", existing.getId());
@@ -365,7 +365,7 @@ public class ChatService {
     public List<SellerInboxResponse> getSellerInbox(UUID sellerId) {
         log.info("Loading inbox for seller [{}]", sellerId);
 
-        return conversationsRepo.findBySellerIdOrderByCreatedAtDesc(sellerId)
+        return conversationsRepo.findBySeller_IdOrderByCreatedAtDesc(sellerId)
                 .stream()
                 .map(c -> {
                     Message lastMessage = messageRepo.findLatestMessage(c.getId());
@@ -417,7 +417,7 @@ public class ChatService {
 
     public List<ConversationResponse> getUserConversations(UUID userId) {
         log.info("Fetching conversations for user [{}]", userId);
-        return conversationsRepo.findByUserIdOrderByCreatedAtDesc(userId)
+        return conversationsRepo.findByUser_IdOrderByCreatedAtDesc(userId)
                 .stream().map(this::mapToConversationResponse)
                 .collect(Collectors.toList());
     }
@@ -433,7 +433,7 @@ public class ChatService {
     // ═══════════════════════════════════════════════════════════
 
     public List<ConversationResponse> getSellerConversations(UUID sellerId) {
-        return conversationsRepo.findBySellerIdOrderByCreatedAtDesc(sellerId)
+        return conversationsRepo.findBySeller_IdOrderByCreatedAtDesc(sellerId)
                 .stream().map(this::mapToConversationResponse)
                 .collect(Collectors.toList());
     }
