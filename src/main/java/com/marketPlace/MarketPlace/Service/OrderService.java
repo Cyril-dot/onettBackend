@@ -152,7 +152,7 @@ public class OrderService {
         for (OrderItem item : order.getOrderItems()) {
             Product product = item.getProduct();
 
-            // FIXED: null guard — product may have been deleted after order was placed
+            // null guard — product may have been deleted after order was placed
             if (product == null) {
                 log.warn("Skipping stock deduction — product no longer exists for item [{}]", item.getId());
                 continue;
@@ -229,7 +229,7 @@ public class OrderService {
         for (OrderItem item : order.getOrderItems()) {
             Product product = item.getProduct();
 
-            // FIXED: null guard — product may have been deleted after order was placed
+            // null guard — product may have been deleted after order was placed
             if (product == null) {
                 log.warn("Skipping stock restore — product no longer exists for item [{}]", item.getId());
                 continue;
@@ -320,7 +320,7 @@ public class OrderService {
             for (OrderItem item : order.getOrderItems()) {
                 Product product = item.getProduct();
 
-                // FIXED: null guard — product may have been deleted after order was placed
+                // null guard — product may have been deleted after order was placed
                 if (product == null) {
                     log.warn("[ADMIN] Skipping stock restore — product no longer exists for item [{}]", item.getId());
                     continue;
@@ -540,10 +540,13 @@ public class OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    /**
-     * FIXED: Full null-safety on item.getProduct() and product.getImages().
-     * Products can be deleted after an order is placed — this must never crash the response mapper.
-     */
+    // ═══════════════════════════════════════════════════════════
+    // MAPPER — ORDER ITEM
+    // Full null-safety on item.getProduct() and product.getImages().
+    // Products can be deleted after an order is placed — this must
+    // never crash the response mapper.
+    // ═══════════════════════════════════════════════════════════
+
     private OrderItemResponse mapToOrderItemResponse(OrderItem item) {
         Product product = item.getProduct();
 
@@ -552,16 +555,16 @@ public class OrderService {
         String primaryImage = null;
 
         if (product != null) {
-            productId  = product.getId();
+            productId   = product.getId();
             productName = product.getName();
 
             List<ProductImage> images = product.getImages();
-            if (images != null) {
+            if (images != null && !images.isEmpty()) {
                 primaryImage = images.stream()
                         .filter(img -> img.getDisplayOrder() == 0)
                         .findFirst()
                         .map(ProductImage::getImageUrl)
-                        .orElse(null);
+                        .orElse(images.get(0).getImageUrl()); // fallback to first image
             }
         }
 
@@ -577,29 +580,67 @@ public class OrderService {
                 .build();
     }
 
-    private OrderResponse mapToOrderResponse(Order order) {
-        String paymentReference = paymentRepo.findByOrderId(order.getId())
-                .map(Payment::getScreenshotUrl)
-                .orElse(null);
+    // ═══════════════════════════════════════════════════════════
+    // MAPPER — ORDER RESPONSE
+    // Now includes: customerPhone, accountName, accountNumber, bank
+    // All pulled safely from the Payment entity (may be null if
+    // the customer has not yet submitted payment).
+    // ═══════════════════════════════════════════════════════════
 
-        PaymentStatus paymentStatus = paymentRepo.findByOrderId(order.getId())
-                .map(Payment::getPaymentStatus)
-                .orElse(null);
+    private OrderResponse mapToOrderResponse(Order order) {
+
+        // Single query — reuse Optional for all payment fields
+        Optional<Payment> paymentOpt = paymentRepo.findByOrderId(order.getId());
+
+        String        paymentReference = paymentOpt.map(Payment::getScreenshotUrl).orElse(null);
+        PaymentStatus paymentStatus    = paymentOpt.map(Payment::getPaymentStatus).orElse(null);
+
+        // ── NEW: sender / account details from Payment ──────────────────────
+        // senderAccountName  → who sent the money (account/MoMo name)
+        // senderPhoneNumber  → MoMo number used to send (acts as account number)
+        // bank field          → defaulted to "Mobile Money" since your platform
+        //                       uses MoMo; extend Payment entity with a `bank`
+        //                       field later if needed
+        String accountName   = paymentOpt.map(Payment::getSenderAccountName).orElse(null);
+        String accountNumber = paymentOpt.map(Payment::getSenderPhoneNumber).orElse(null);
+        // If you add a `bank` or `provider` field to Payment later, swap this line:
+        String bank          = (accountNumber != null) ? "Mobile Money" : null;
+
+        // ── NEW: customer phone from User entity ────────────────────────────
+        // Adjust getPhone() to match the actual method name on your User entity
+        // e.g. getPhoneNumber(), getMobile(), getContact(), etc.
+        String customerPhone = null;
+        try {
+            customerPhone = order.getUser().getPhoneNumber();
+        } catch (Exception e) {
+            // Defensive: phone field may not exist yet — won't crash the mapper
+            log.debug("Could not retrieve phone for user [{}]: {}", order.getUser().getId(), e.getMessage());
+        }
 
         return OrderResponse.builder()
                 .orderId(order.getId())
+                // Customer
                 .customerName(order.getUser().getFullName())
                 .customerEmail(order.getUser().getEmail())
+                .customerPhone(customerPhone)                           // NEW
+                // Order
                 .orderStatus(order.getOrderStatus().name())
-                .paymentStatus(paymentStatus != null ? paymentStatus.name() : "N/A")
-                .paymentReference(paymentReference)
                 .total(order.getTotal())
                 .deliveryAddress(order.getDeliveryAddress())
                 .notes(order.getNotes())
                 .canCancel(canUserCancelOrder(order))
+                // Payment
+                .paymentStatus(paymentStatus != null ? paymentStatus.name() : "N/A")
+                .paymentReference(paymentReference)
+                // Account / Sender                                      // NEW
+                .accountName(accountName)
+                .accountNumber(accountNumber)
+                .bank(bank)
+                // Items
                 .orderItems(order.getOrderItems().stream()
                         .map(this::mapToOrderItemResponse)
                         .collect(Collectors.toList()))
+                // Timestamps
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
                 .build();
